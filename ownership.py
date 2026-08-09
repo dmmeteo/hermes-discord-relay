@@ -92,6 +92,26 @@ def _as_bool(value: Any, default: bool) -> bool:
     return default
 
 
+def _as_tristate(value: Any) -> bool | None:
+    """``True``/``False`` for a recognised flag value, ``None`` for "unset".
+
+    Distinct from :func:`_as_bool`, which folds "unset" and "unparseable" into
+    a caller-supplied default.  Composing the env bridge with the YAML mapping
+    needs the third state: only an explicit yes/no may move ``enabled``, and
+    anything else has to leave the config file's own answer standing.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in _TRUTHY:
+        return True
+    if text in _FALSEY:
+        return False
+    return None
+
+
 def _as_number(value: Any, default: float, *, cast=float) -> Any:
     try:
         parsed = cast(value)
@@ -147,6 +167,31 @@ class OwnershipConfig:
                 raw.get("handoff_cooldown_seconds"), defaults.handoff_cooldown_seconds
             ),
         )
+
+
+    @classmethod
+    def resolve(cls, env_raw: Any, extra_raw: Any) -> OwnershipConfig:
+        """Compose the env bridge with the ``config.yaml`` value.
+
+        The env var is an operator **switch**, not an alternative config
+        source: ``config.yaml`` is where the guards live.  So a recognised env
+        value moves ``enabled`` and nothing else.
+
+        * ``false`` — kill switch.  Wins over any YAML, which is the documented
+          direction and the reason the variable exists.
+        * ``true``  — turns the feature on while leaving ``bot_handoff``,
+          ``handoff_marker`` and the hop budget exactly as the mapping set
+          them.  Reading it as a whole config used to reset ``bot_handoff:
+          off`` to the ``marker`` default, silently re-opening bot-authored
+          force-admission on a deployment that had deliberately closed it.
+        * anything else (unset, empty, unparseable) — no opinion; the YAML
+          value stands on its own.
+        """
+        switch = _as_tristate(env_raw)
+        base = cls.from_raw(extra_raw)
+        if switch is None:
+            return base
+        return replace(base, enabled=switch)
 
 
 @dataclass(frozen=True)

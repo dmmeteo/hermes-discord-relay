@@ -145,6 +145,9 @@ class TestOptionalSeams:
             def _gate_raw(self, extra_key, env_key):
                 return None
 
+            def _gate_env(self, name, default=""):
+                return default
+
             def _get_allow_bots(self):
                 return "none"
 
@@ -235,6 +238,46 @@ class TestGateRawFallback:
     def test_an_adapter_without_a_config_does_not_explode(self, monkeypatch):
         monkeypatch.delenv("DISCORD_TEST_KEY", raising=False)
         assert compat.gate_raw(object(), "test_key", "DISCORD_TEST_KEY") is None
+
+
+class TestSeparatedGateReads:
+    """``gate_raw`` collapses env and extra; these keep them distinguishable.
+
+    Composing the two correctly (env moves ``enabled`` only, YAML keeps its
+    guards) is impossible once they have been flattened into one value.
+    """
+
+    def test_gate_env_delegates_to_the_core_reader(self):
+        class Snapshotting(_Legacy):
+            def _gate_env(self, name, default=""):
+                return f"snapshot:{name}"
+
+        assert compat.gate_env(Snapshotting(), "DISCORD_X") == "snapshot:DISCORD_X"
+
+    def test_gate_env_falls_back_to_the_environment(self, monkeypatch):
+        monkeypatch.setenv("DISCORD_X", " on ")
+        assert compat.gate_env(_Legacy(), "DISCORD_X") == "on"
+
+    def test_gate_env_is_empty_when_unset(self, monkeypatch):
+        monkeypatch.delenv("DISCORD_X", raising=False)
+        assert compat.gate_env(_Legacy(), "DISCORD_X") == ""
+
+    def test_gate_env_ignores_extra(self, monkeypatch):
+        monkeypatch.delenv("DISCORD_X", raising=False)
+        assert compat.gate_env(_Legacy({"x": "from-extra"}), "DISCORD_X") == ""
+
+    def test_extra_value_reads_only_the_per_adapter_config(self, monkeypatch):
+        monkeypatch.setenv("DISCORD_X", "from-env")
+        assert compat.extra_value(_Legacy({"x": {"a": 1}}), "x") == {"a": 1}
+
+    def test_extra_value_is_none_without_a_config(self):
+        assert compat.extra_value(object(), "x") is None
+
+    def test_extra_value_is_none_for_an_absent_key(self):
+        assert compat.extra_value(_Legacy({}), "x") is None
+
+    def test_the_gate_env_seam_is_declared_optional(self):
+        assert "_gate_env" in compat.OPTIONAL_ADAPTER_METHODS
 
 
 class TestCsvSet:

@@ -91,12 +91,19 @@ class DiscordCustomAdapter(DiscordAdapter):
         ``gateway.multiplex_profiles`` — a bare ``os.getenv`` would read
         another profile's process-global value.
 
-        Precedence follows every other Discord gate: **env first, then
-        ``config.extra``**.  That is what makes
-        ``DISCORD_THREAD_OWNERSHIP_TRANSFER=false`` usable as a kill switch
-        over a ``config.yaml`` that says true.
+        The two sources are read **separately** and composed by
+        :meth:`OwnershipConfig.resolve`, rather than collapsed by a single
+        env-then-extra lookup.  The env var is a switch: it moves ``enabled``
+        and leaves every guard in the mapping form alone.  Flattening the two
+        made ``DISCORD_THREAD_OWNERSHIP_TRANSFER=true`` replace the whole block
+        with defaults, which reset ``bot_handoff: off`` and re-opened
+        bot-authored force-admission.  ``=false`` remains a kill switch over a
+        ``config.yaml`` that says true.
         """
-        return OwnershipConfig.from_raw(compat.gate_raw(self, CONFIG_KEY, ENV_FLAG))
+        return OwnershipConfig.resolve(
+            compat.gate_env(self, ENV_FLAG),
+            compat.extra_value(self, CONFIG_KEY),
+        )
 
     @property
     def _ownership_store(self) -> ThreadOwnershipStore:

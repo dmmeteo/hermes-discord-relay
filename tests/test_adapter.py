@@ -868,6 +868,164 @@ class TestAdapterConfig:
     def test_default_is_off(self, tmp_path):
         assert _make_adapter(tmp_path)._ownership_config().enabled is False
 
+
+class TestEnvFlagPreservesMappingGuards:
+    """M1: a truthy env flag must not silently discard the mapping form.
+
+    ``config.extra`` is the profile-scoped carrier the YAML bridge writes, and
+    the env var is the operator kill switch.  Composing them by "env wins
+    wholesale" meant ``DISCORD_THREAD_OWNERSHIP_TRANSFER=true`` reset
+    ``bot_handoff: off`` to ``marker`` — re-opening the bot ingress path an
+    operator had deliberately closed.
+    """
+
+    GUARDED = {
+        "thread_ownership_transfer": {
+            "enabled": False,
+            "bot_handoff": "off",
+            "max_handoffs": 2,
+            "handoff_cooldown_seconds": 600,
+        }
+    }
+
+    def test_truthy_env_enables_without_touching_the_guards(self, tmp_path):
+        a = _make_adapter(tmp_path, self.GUARDED)
+        with patch.dict(os.environ, {"DISCORD_THREAD_OWNERSHIP_TRANSFER": "true"}):
+            cfg = a._ownership_config()
+        assert cfg.enabled is True
+        assert cfg.bot_handoff == "off"
+        assert cfg.max_handoffs == 2
+        assert cfg.handoff_cooldown_seconds == 600
+
+    def test_falsey_env_remains_a_kill_switch(self, tmp_path):
+        a = _make_adapter(
+            tmp_path, {"thread_ownership_transfer": {"enabled": True}}
+        )
+        with patch.dict(os.environ, {"DISCORD_THREAD_OWNERSHIP_TRANSFER": "false"}):
+            assert a._ownership_config().enabled is False
+
+    def test_a_bot_handoff_off_thread_refuses_a_marker_under_a_truthy_env(
+        self, tmp_path
+    ):
+        """End to end: the guard actually holds at admission, not just in config."""
+        a = _make_adapter(tmp_path, self.GUARDED)
+        with patch.dict(os.environ, {"DISCORD_THREAD_OWNERSHIP_TRANSFER": "true"}):
+            _admit(
+                a,
+                _message(
+                    author=_user(HUMAN),
+                    content=f"<@{BOT_C}> start",
+                    mentions=[_user(BOT_C, bot=True)],
+                    message_id=1,
+                ),
+            )
+            handoff = _message(
+                author=_user(BOT_C, bot=True),
+                content=f"[[handoff]] <@{SELF_ID}> your turn",
+                mentions=[_user(SELF_ID, bot=True)],
+                message_id=2,
+            )
+            # bot_handoff="off" survived, so no bot-authored message is
+            # force-admitted past DISCORD_ALLOW_BOTS=none.
+            assert _admit(a, handoff) is False
+        assert a._ownership_store.owner_of(str(THREAD_ID)) == str(BOT_C)
+
+    def test_env_only_still_enables_with_defaults(self, tmp_path):
+        a = _make_adapter(tmp_path)
+        with patch.dict(os.environ, {"DISCORD_THREAD_OWNERSHIP_TRANSFER": "true"}):
+            cfg = a._ownership_config()
+        assert cfg.enabled is True
+        assert cfg.bot_handoff == "marker"
+
+
+
+class TestBotHandoffOffPreservesTheStockBoundary:
+    """The README's security note, asserted rather than promised.
+
+    ``bot_handoff: off`` must never force-admit a bot-authored message, so
+    ``DISCORD_ALLOW_BOTS`` keeps meaning exactly what it means without this
+    plugin.  Ownership still silences non-owners on human messages.
+    """
+
+    OFF = {"thread_ownership_transfer": {"enabled": True, "bot_handoff": "off"}}
+
+    def _own_the_thread(self, adapter, owner=None):
+        owner = owner or BOT_C
+        _admit(
+            adapter,
+            _message(
+                author=_user(HUMAN),
+                content=f"<@{owner}> start",
+                mentions=[_user(owner, bot=True)],
+                message_id=1,
+            ),
+        )
+
+    def test_an_owner_marker_handoff_is_not_admitted(self, tmp_path):
+        a = _make_adapter(tmp_path, self.OFF)
+        self._own_the_thread(a)
+        handoff = _message(
+            author=_user(BOT_C, bot=True),
+            content=f"[[handoff]] <@{SELF_ID}> your turn",
+            mentions=[_user(SELF_ID, bot=True)],
+            message_id=2,
+        )
+        assert _admit(a, handoff) is False
+
+    def test_ownership_does_not_move_to_us(self, tmp_path):
+        a = _make_adapter(tmp_path, self.OFF)
+        self._own_the_thread(a)
+        _admit(
+            a,
+            _message(
+                author=_user(BOT_C, bot=True),
+                content=f"[[handoff]] <@{SELF_ID}> your turn",
+                mentions=[_user(SELF_ID, bot=True)],
+                message_id=2,
+            ),
+        )
+        assert a._ownership_store.owner_of(str(THREAD_ID)) == str(BOT_C)
+
+    def test_the_allow_bots_gate_is_never_widened(self, tmp_path):
+        """No env write and no forced mode, for any bot message in the thread."""
+        a = _make_adapter(tmp_path, self.OFF)
+        self._own_the_thread(a)
+        seen = []
+        real = adapter_mod.compat.forced_allow_bots
+        with patch.object(
+            adapter_mod.compat,
+            "forced_allow_bots",
+            side_effect=lambda active: seen.append(active) or real(active),
+        ):
+            _admit(
+                a,
+                _message(
+                    author=_user(BOT_C, bot=True),
+                    content=f"[[handoff]] <@{SELF_ID}> your turn",
+                    mentions=[_user(SELF_ID, bot=True)],
+                    message_id=2,
+                ),
+            )
+        assert True not in seen
+        assert a._get_allow_bots() == "none"
+
+    def test_human_side_ownership_still_silences_non_owners(self, tmp_path):
+        """The half of the feature that needs no widening at all."""
+        a = _make_adapter(tmp_path, self.OFF)
+        self._own_the_thread(a)
+        follow_up = _message(
+            author=_user(HUMAN), content="and then?", message_id=3
+        )
+        assert _admit(a, follow_up) is False
+
+    def test_the_owner_still_answers_its_own_thread(self, tmp_path):
+        a = _make_adapter(tmp_path, self.OFF)
+        self._own_the_thread(a, owner=SELF_ID)
+        follow_up = _message(
+            author=_user(HUMAN), content="and then?", message_id=3
+        )
+        assert _admit(a, follow_up) is True
+
 # ── the gate-env snapshot, on cores that have one ───────────────────────────
 
 _compat = adapter_mod.compat.probe()

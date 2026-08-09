@@ -868,6 +868,89 @@ class TestConfigParsing:
         assert d.reason == "budget_exhausted"
 
 
+class TestEnvOverridesMappingGuards:
+    """``resolve`` — how the env bridge composes with the mapping form.
+
+    The env var exists for parity with the other ``DISCORD_*`` gates, i.e. as
+    an operator kill switch.  Treating a truthy value as a *whole config*
+    replaced ``bot_handoff``, ``max_handoffs`` and the cooldown/window budget
+    with defaults — silently re-opening bot-authored force-admission on a
+    deployment that had set ``bot_handoff: off``.  A truthy env value may only
+    move ``enabled``.
+    """
+
+    MAPPING = {
+        "enabled": False,
+        "bot_handoff": "off",
+        "handoff_marker": "[[go]]",
+        "max_handoffs": 2,
+        "handoff_window_seconds": 60,
+        "handoff_cooldown_seconds": 600,
+    }
+
+    def test_no_env_value_leaves_the_mapping_untouched(self):
+        cfg = OwnershipConfig.resolve(None, dict(self.MAPPING, enabled=True))
+        assert cfg.enabled is True
+        assert cfg.bot_handoff == "off"
+        assert cfg.max_handoffs == 2
+        assert cfg.handoff_cooldown_seconds == 600
+
+    def test_a_truthy_env_value_only_flips_enabled(self):
+        cfg = OwnershipConfig.resolve("true", self.MAPPING)
+        assert cfg.enabled is True
+        assert cfg.bot_handoff == "off"           # the guard survives
+        assert cfg.handoff_marker == "[[go]]"
+        assert cfg.max_handoffs == 2
+        assert cfg.handoff_window_seconds == 60
+        assert cfg.handoff_cooldown_seconds == 600
+
+    def test_a_truthy_env_value_cannot_reopen_bot_handoff(self):
+        """The regression this test exists for."""
+        cfg = OwnershipConfig.resolve("1", {"bot_handoff": "off"})
+        assert cfg.enabled is True
+        assert cfg.bot_handoff == "off"
+
+    def test_a_falsey_env_value_is_still_a_kill_switch(self):
+        cfg = OwnershipConfig.resolve("false", dict(self.MAPPING, enabled=True))
+        assert cfg.enabled is False
+
+    def test_the_kill_switch_beats_a_scalar_true_in_yaml(self):
+        assert OwnershipConfig.resolve("false", True).enabled is False
+
+    def test_a_truthy_env_value_with_no_yaml_uses_defaults(self):
+        cfg = OwnershipConfig.resolve("yes", None)
+        assert cfg.enabled is True
+        assert cfg.bot_handoff == "marker"
+        assert cfg.max_handoffs == 8
+
+    def test_a_truthy_env_value_over_scalar_yaml_uses_defaults(self):
+        cfg = OwnershipConfig.resolve("true", False)
+        assert cfg.enabled is True
+        assert cfg.bot_handoff == "marker"
+
+    def test_an_unparseable_env_value_defers_to_yaml(self):
+        """Neither truthy nor falsey: the operator did not express intent."""
+        cfg = OwnershipConfig.resolve("maybe", dict(self.MAPPING, enabled=True))
+        assert cfg.enabled is True
+        assert cfg.bot_handoff == "off"
+
+    def test_an_empty_env_value_defers_to_yaml(self):
+        cfg = OwnershipConfig.resolve("", dict(self.MAPPING, enabled=True))
+        assert cfg.bot_handoff == "off"
+
+    def test_a_mapping_disabled_explicitly_stays_off_without_env(self):
+        assert OwnershipConfig.resolve(None, self.MAPPING).enabled is False
+
+    def test_nothing_anywhere_is_off(self):
+        assert OwnershipConfig.resolve(None, None).enabled is False
+
+    def test_a_real_bool_env_value_is_accepted(self):
+        """``_gate_env`` returns strings, but ``config.extra`` may hold a bool."""
+        cfg = OwnershipConfig.resolve(True, {"bot_handoff": "off"})
+        assert cfg.enabled is True
+        assert cfg.bot_handoff == "off"
+
+
 class TestWriteOffTheEventLoop:
     """The durable write must never stall the Discord event loop.
 

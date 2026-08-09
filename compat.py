@@ -56,6 +56,7 @@ REQUIRED_ADAPTER_METHODS = (
 #: Adapter methods with a fallback in this module.
 OPTIONAL_ADAPTER_METHODS = (
     "_gate_raw",
+    "_gate_env",
     "_get_allow_bots",
     "_snapshot_gate_env",
     "_get_allowed_channels",
@@ -207,6 +208,35 @@ def gate_raw(adapter: Any, extra_key: str, env_key: str) -> Any:
     value = (os.getenv(env_key) or "").strip()
     if value:
         return value
+    extra = getattr(getattr(adapter, "config", None), "extra", None)
+    if isinstance(extra, dict):
+        return extra.get(extra_key)
+    return None
+
+
+def gate_env(adapter: Any, env_key: str, default: str = "") -> str:
+    """Read one gate env var, honouring the adapter's snapshot where there is one.
+
+    Separate from :func:`gate_raw` on purpose: that helper collapses env and
+    ``config.extra`` into a single value, and composing the two correctly is
+    impossible once they have been flattened.
+    """
+    helper = getattr(adapter, "_gate_env", None)
+    if callable(helper):
+        try:
+            return helper(env_key, default)
+        except TypeError:  # pragma: no cover - a one-argument variant
+            return helper(env_key)
+    return scoped_gate_env(env_key, default)
+
+
+def extra_value(adapter: Any, extra_key: str) -> Any:
+    """Read one key from this adapter's ``config.extra``.
+
+    ``extra`` is per-adapter and therefore the profile-safe carrier: it is
+    where the YAML bridge puts the value, and it never leaks across profiles
+    the way process-global env does.
+    """
     extra = getattr(getattr(adapter, "config", None), "extra", None)
     if isinstance(extra, dict):
         return extra.get(extra_key)
