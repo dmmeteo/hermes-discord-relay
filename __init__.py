@@ -107,11 +107,15 @@ def _install_override(ctx) -> None:
     resolve_builtin_bridge()
 
     if not compat.ensure_discord_installed():
-        # Not fatal: the entry we register inherits the built-in ``check_fn``,
-        # which installs discord.py before the gateway builds an adapter.
+        # Not fatal: the entry we register inherits the built-in dependency
+        # hook, which installs discord.py before the gateway builds an adapter.
+        # Which field that is depends on the build — ``ensure_deps_fn`` where
+        # upstream split the passive probe from the installer, ``check_fn``
+        # before that — and the capturing context forwards every kwarg, so the
+        # right one comes across without this plugin having to name it.
         logger.info(
             "hermes-discord-thread-ownership: discord.py is not installed yet; "
-            "the inherited check_fn will install it before first use"
+            "the inherited dependency hook will install it before first use"
         )
 
     from .adapter import build_adapter
