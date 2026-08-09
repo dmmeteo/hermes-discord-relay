@@ -13,6 +13,7 @@ config reader.
 
 from __future__ import annotations
 
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -23,6 +24,17 @@ from conftest import PLUGIN_DIR
 
 MANIFEST = yaml.safe_load((PLUGIN_DIR / "plugin.yaml").read_text(encoding="utf-8"))
 PLUGIN_NAME = MANIFEST["name"]
+
+#: The canonical GitHub slug this plugin is published under.  It is what every
+#: documented ``hermes plugins install`` command must say, and its repository
+#: half must equal the manifest name — that is the rule ``plugin.yaml`` states
+#: and the reason a reader's first command works.  The *local* checkout
+#: directory is irrelevant to both (the installer derives the install path from
+#: the manifest, never from the clone's directory name), so it is deliberately
+#: not asserted on.
+REPO_SLUG = "dmmeteo/hermes-discord-thread-ownership"
+
+README = (PLUGIN_DIR / "README.md").read_text(encoding="utf-8")
 
 #: Everything the installed copy needs at runtime.  Anything the package
 #: imports must be here, or discovery fails with an ImportError.
@@ -101,8 +113,25 @@ class TestInstallerContract:
 
         assert _sanitize_plugin_name(PLUGIN_NAME, tmp_path).name == PLUGIN_NAME
 
-    def test_the_manifest_name_matches_the_repository_name(self):
-        assert PLUGIN_DIR.name.startswith(PLUGIN_NAME) or PLUGIN_DIR.name == PLUGIN_NAME
+    def test_the_repo_slug_and_the_manifest_name_are_the_same_string(self):
+        """``plugin.yaml`` says "keep it identical to the repository name"."""
+        owner, sep, repo = REPO_SLUG.partition("/")
+        assert sep == "/" and owner
+        assert repo == PLUGIN_NAME
+
+    def test_every_documented_install_command_uses_the_canonical_slug(self):
+        """A wrong slug here is a 404 on the reader's very first command."""
+        installs = re.findall(r"plugins\s+install\s+(\S+)", README)
+        assert installs, "the README must document the install command"
+        assert set(installs) == {REPO_SLUG}
+
+    def test_every_other_documented_plugin_command_uses_the_manifest_name(self):
+        """``enable``/``disable``/``update``/``remove`` match on the manifest name."""
+        commands = re.findall(
+            r"plugins\s+(?:enable|disable|update|remove)\s+(\S+)", README
+        )
+        assert commands
+        assert set(commands) == {PLUGIN_NAME}
 
     def test_the_manifest_declares_the_platform_kind(self):
         assert MANIFEST["kind"] == "platform"
