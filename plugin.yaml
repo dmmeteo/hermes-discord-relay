@@ -1,0 +1,22 @@
+# Hermes plugin manifest.
+#
+# ``name`` is load-bearing twice over: `hermes plugins install` uses it as the
+# directory name under ~/.hermes/plugins/, and `hermes plugins enable` matches
+# on it.  Keep it identical to the repository name.
+manifest_version: 1
+name: hermes-discord-thread-ownership
+kind: platform
+version: 1.0.0
+description: >
+  Discord adapter override adding single-owner thread admission. Subclasses the
+  built-in Discord adapter and changes only who is allowed to answer inside a
+  thread; connection, voice, slash commands, media, auth, reactions and cron
+  delivery are inherited unchanged. Registers under the "discord" platform ID,
+  replacing the bundled entry.
+author: dmmeteo
+requires_env:
+  - name: DISCORD_BOT_TOKEN
+    description: "Discord bot token (shared with the built-in Discord adapter)"
+    prompt: "Discord bot token"
+    url: "https://discord.com/developers/applications"
+    password: true
