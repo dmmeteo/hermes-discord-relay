@@ -61,6 +61,13 @@ repository root *is* the plugin package, with `plugin.yaml` and `__init__.py`
 at the top level. There is no install script to run and nothing to `pip
 install`.
 
+The install directory and the `plugins enable` key both come from
+`plugin.yaml`'s `name`, never from the directory a clone happens to sit in, so
+a local checkout may be called anything. The published slug is
+`dmmeteo/hermes-discord-thread-ownership`, and the manifest name matches it —
+`tests/test_install_layout.py` asserts both, and that every command in this
+README uses them.
+
 Then enable the feature in that profile's `config.yaml`:
 
 ```yaml
@@ -144,9 +151,61 @@ have made the budget match nothing and silently disabled the limit.)
 
 **Env override:** `DISCORD_THREAD_OWNERSHIP_TRANSFER` is an internal bridge for
 parity with the other `DISCORD_*` gates; `config.yaml` is the user-facing
-setting. Precedence is **env first, then `config.yaml`**, matching every other
-Discord gate, so `DISCORD_THREAD_OWNERSHIP_TRANSFER=false` works as a kill
-switch over a config that says true.
+setting. It is a **switch, not an alternative config source** — it moves
+`enabled` and nothing else:
+
+| `DISCORD_THREAD_OWNERSHIP_TRANSFER` | Effect |
+|---|---|
+| `false` / `0` / `no` / `off` | Kill switch. Wins over any `config.yaml`. |
+| `true` / `1` / `yes` / `on` | Turns the feature on. **Every guard in the mapping form — `bot_handoff`, `handoff_marker`, `max_handoffs`, the window and cooldown — is preserved.** |
+| unset, empty, or unrecognised | No opinion; `config.yaml` stands on its own. |
+
+In particular a truthy env value cannot resurrect `bot_handoff` from `off` back
+to the `marker` default, so it can never re-open the bot ingress path described
+in the security note below.
+
+### Security note: what `bot_handoff` changes about `DISCORD_ALLOW_BOTS`
+
+**Enabling this feature with the default `bot_handoff: marker` widens Discord's
+bot ingress boundary.** Read this before enabling it on a server with
+third-party bots.
+
+Core's admission gate treats `DISCORD_ALLOW_BOTS` as the *only* gate for
+bot-authored messages — the human allowlist (`DISCORD_ALLOWED_USERS` /
+`DISCORD_ALLOWED_ROLES`) is not consulted on that branch at all. A validated
+handoff is force-admitted past it. The full chain, on stock defaults:
+
+1. An allowlisted human @mentions third-party bot **X** in a thread.
+2. **X** becomes the thread owner — that is the feature working as designed.
+3. **X** posts `[[handoff]] @us`.
+4. We admit that message even though `DISCORD_ALLOW_BOTS=none`, and it becomes
+   an agent turn.
+
+So a bot you do not control can hand work to your agent, if a human you trust
+put it in the thread first. The guards are real and tested — owner only, marker
+required, no self-handoff, ambiguity refused, bounce guard, hop budget — and
+they bound *who* and *how often*, but they do not restore the original
+boundary.
+
+| Setting | Bot ingress boundary |
+|---|---|
+| `bot_handoff: marker` (default) | Widened as above: the current owner, and only the current owner, can force-admit one handoff addressed to you. |
+| `bot_handoff: mention` | Same widening, without the marker requirement — an owner mentioning exactly one other bot is enough. Loosest. |
+| `bot_handoff: off` | **Stock boundary preserved exactly.** No bot-authored message is ever force-admitted; `DISCORD_ALLOW_BOTS` means precisely what it means without this plugin. Ownership still silences non-owners on human messages, which is the part most people want. |
+
+If you only want "one of my bots answers per thread" and never agent-to-agent
+handoff, set `bot_handoff: off`:
+
+```yaml
+discord:
+  thread_ownership_transfer:
+    enabled: true
+    bot_handoff: off
+```
+
+The default is `marker` rather than `off` because agent-to-agent handoff is the
+second half of the feature, and the marker requirement already makes a handoff
+an explicit, greppable act rather than an accident of conversation.
 
 ### Credential and config reuse
 
@@ -281,7 +340,7 @@ and the plugin behaves predictably at both ends of the range:
 | A **required** seam is missing (e.g. `_discord_message_admission`) | One `ERROR` log naming the exact symbols, then the **built-in Discord adapter is registered instead**. Discord keeps working; this feature is off. |
 | An **optional** seam is missing (`_gate_raw`, `_get_allow_bots`, `_snapshot_gate_env`, the channel-gate helpers) | One `WARNING` naming them; the feature keeps its full behaviour on a documented fallback that mirrors core's own precedence. |
 | The built-in YAML bridge is missing or raises | Loud failure. The override is declined (or the bridge re-raises) rather than applying a *partial* Discord config — losing `require_mention`, `auto_thread`, channel lists, reactions and backfill silently would be worse than not installing. |
-| `discord.py` is not installed yet | Not fatal. The inherited `check_fn` lazily installs it before the gateway builds an adapter; the plugin never imports `discord` at module scope. |
+| `discord.py` is not installed yet | Not fatal. The plugin never imports `discord` at module scope, and the inherited dependency hook installs it before the gateway builds an adapter — `ensure_deps_fn=check_discord_requirements` on builds that split the hook, `check_fn=check_discord_requirements` on older ones. Both are inherited verbatim from the built-in entry, so whichever this Hermes has is what runs. |
 
 The gate-env snapshot is the one place where behaviour genuinely differs
 between builds. On a core that has it, the plugin extends the per-adapter
