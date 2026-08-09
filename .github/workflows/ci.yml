@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint and manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install tooling
+        run: python -m pip install --disable-pip-version-check ruff pyyaml
+
+      - name: Ruff
+        run: ruff check .
+
+      - name: Byte-compile every module
+        run: python -m compileall -q .
+
+      - name: Validate plugin.yaml
+        run: python .github/scripts/check_manifest.py
+
+  tests:
+    name: Tests against Hermes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # The suite runs the *real* Hermes plugin loader, platform registry and
+      # Discord adapter, so it needs a Hermes checkout. Override the source
+      # with the HERMES_REPO / HERMES_REF repository variables; a fork or a
+      # pinned tag is often what you want, since main moves fast.
+      - name: Fetch Hermes
+        id: hermes
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          git clone --depth 1 \
+            ${HERMES_REF:+--branch "$HERMES_REF"} \
+            "$HERMES_REPO" hermes-agent
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+        env:
+          HERMES_REPO: ${{ vars.HERMES_REPO || 'https://github.com/NousResearch/hermes-agent.git' }}
+          HERMES_REF: ${{ vars.HERMES_REF }}
+
+      - name: Report a missing Hermes checkout
+        if: steps.hermes.outcome != 'success'
+        run: |
+          echo "::warning title=Hermes source unavailable::" \
+            "Could not clone the Hermes repository, so the integration suite " \
+            "did not run. Set the HERMES_REPO (and optionally HERMES_REF) " \
+            "repository variables to a checkout this workflow can read."
+
+      - name: Install test dependencies
+        if: steps.hermes.outcome == 'success'
+        run: |
+          python -m pip install --disable-pip-version-check \
+            pytest pyyaml "discord.py>=2.3"
+
+      - name: Install Hermes runtime dependencies
+        if: steps.hermes.outcome == 'success'
+        continue-on-error: true
+        run: |
+          cd hermes-agent
+          python -m pip install --disable-pip-version-check -e . || \
+            python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Run the suite
+        if: steps.hermes.outcome == 'success'
+        env:
+          HERMES_SOURCE_ROOT: ${{ github.workspace }}/hermes-agent
+        run: ./plugin/run-tests.sh -q
