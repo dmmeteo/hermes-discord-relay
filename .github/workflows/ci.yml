@@ -25,7 +25,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install tooling
-        run: python -m pip install --disable-pip-version-check ruff pyyaml
+        run: python -m pip install --disable-pip-version-check "ruff==0.15.*" pyyaml
 
       - name: Ruff
         run: ruff check .
@@ -48,10 +48,25 @@ jobs:
         with:
           python-version: "3.11"
 
+      # A push or an internal pull request must never report green having run
+      # zero tests: on this repository the Hermes checkout is a hard
+      # requirement, and a status check that passes without executing the
+      # suite is worse than a red one. Only a fork PR — which cannot read this
+      # repository's secrets or variables, and so may genuinely be unable to
+      # reach a private Hermes — is allowed the soft path.
+      - name: Decide whether Hermes is optional
+        id: policy
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
+            echo "required=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "required=true" >> "$GITHUB_OUTPUT"
+          fi
+
       # The suite runs the *real* Hermes plugin loader, platform registry and
-      # Discord adapter, so it needs a Hermes checkout. Override the source
-      # with the HERMES_REPO / HERMES_REF repository variables; a fork or a
-      # pinned tag is often what you want, since main moves fast.
+      # Discord adapter, so it needs a Hermes checkout. Point HERMES_REPO /
+      # HERMES_REF at one; a pinned ref is usually what you want, since main
+      # moves fast.
       - name: Fetch Hermes
         id: hermes
         continue-on-error: true
@@ -60,18 +75,26 @@ jobs:
           git clone --depth 1 \
             ${HERMES_REF:+--branch "$HERMES_REF"} \
             "$HERMES_REPO" hermes-agent
-          echo "ok=true" >> "$GITHUB_OUTPUT"
         env:
           HERMES_REPO: ${{ vars.HERMES_REPO || 'https://github.com/NousResearch/hermes-agent.git' }}
           HERMES_REF: ${{ vars.HERMES_REF }}
 
-      - name: Report a missing Hermes checkout
-        if: steps.hermes.outcome != 'success'
+      - name: Fail when Hermes is required but unavailable
+        if: steps.hermes.outcome != 'success' && steps.policy.outputs.required == 'true'
         run: |
-          echo "::warning title=Hermes source unavailable::" \
+          echo "::error title=Hermes source unavailable::" \
             "Could not clone the Hermes repository, so the integration suite " \
-            "did not run. Set the HERMES_REPO (and optionally HERMES_REF) " \
-            "repository variables to a checkout this workflow can read."
+            "could not run. Set the HERMES_REPO (and optionally HERMES_REF) " \
+            "repository variables to a checkout this workflow can read. " \
+            "Failing rather than reporting a green check that ran no tests."
+          exit 1
+
+      - name: Skip on a fork without access to Hermes
+        if: steps.hermes.outcome != 'success' && steps.policy.outputs.required != 'true'
+        run: |
+          echo "::warning title=Hermes source unavailable on a fork::" \
+            "The integration suite did not run. A maintainer must re-run it " \
+            "from a branch in this repository before merging."
 
       - name: Install test dependencies
         if: steps.hermes.outcome == 'success'
@@ -87,8 +110,26 @@ jobs:
           python -m pip install --disable-pip-version-check -e . || \
             python -m pip install --disable-pip-version-check -r requirements.txt
 
+      # -p no:cacheprovider keeps the run from writing caches into the checkout,
+      # and the junit report is what the next step counts tests from.
       - name: Run the suite
         if: steps.hermes.outcome == 'success'
         env:
           HERMES_SOURCE_ROOT: ${{ github.workspace }}/hermes-agent
-        run: ./plugin/run-tests.sh -q
+        run: ./plugin/run-tests.sh -q --junitxml="${{ github.workspace }}/results.xml"
+
+      # A suite that collected nothing exits 5, but a misconfigured filter can
+      # also exit 0 having run one test. Assert a floor so "green" always means
+      # the suite actually ran.
+      - name: Assert the suite actually ran
+        if: steps.hermes.outcome == 'success'
+        run: |
+          python - <<'EOF'
+          import sys, xml.etree.ElementTree as ET
+          root = ET.parse("${{ github.workspace }}/results.xml").getroot()
+          suites = root.iter("testsuite") if root.tag == "testsuites" else [root]
+          total = sum(int(s.get("tests", 0)) for s in suites)
+          print(f"collected {total} tests")
+          if total < 200:
+              sys.exit(f"::error::only {total} tests ran; expected the full suite")
+          EOF
