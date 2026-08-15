@@ -319,13 +319,12 @@ replaces a pending loader for the same name. The plugin name, the adapter class
 and the config key carry the distinct identity instead — the places an operator
 actually reads. `PLATFORM_ID` is a single constant in `__init__.py`.
 
-**The override is itself deferred.** `register()` installs a loader and imports
-nothing heavy; the built-in adapter is imported the first time something asks
-the registry for the Discord platform (gateway start, cron delivery,
-`hermes setup`, `send_message`). This matters because user platform plugins are
-loaded *eagerly* during plugin discovery, and discovery runs on nearly every
-`hermes` invocation — importing the Discord adapter there would add 1–2s to
-plain `hermes chat`.
+**The override registers through Hermes' plugin context.** Current Hermes owns
+platform registrations in a profile-scoped lifecycle ledger. Calling
+`ctx.register_platform()` later from a plugin-managed deferred loader escapes
+that lifecycle and can leave the built-in adapter in use. The plugin therefore
+materializes its inherited override during `register()`; Hermes still controls
+when the platform plugin itself is loaded.
 
 ---
 

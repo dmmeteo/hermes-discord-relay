@@ -132,6 +132,8 @@ def plugin_context():
         )
         manager = MagicMock()
         manager._plugin_platform_names = set()
+        from gateway.platform_registry import platform_registry
+        manager.scope_key = platform_registry.current_scope_key()
         return PluginContext(manifest, manager)
 
     return _make

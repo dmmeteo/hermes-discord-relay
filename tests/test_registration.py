@@ -55,56 +55,16 @@ class TestRegistryOverride:
         assert _register_now(plugin_context()).adapter_factory is not None
         assert plugin.PLATFORM_ID == "discord"
 
-    def test_the_deferred_loader_installs_the_override_on_first_lookup(
+    def test_registration_uses_the_active_profile_scope(
         self, registry, plugin_context
     ):
-        registry._entries.pop("discord", None)
-        plugin.register(plugin_context())
-        assert "discord" not in registry._entries      # nothing concrete yet
-        entry = registry.get("discord")                # fires the loader
+        ctx = plugin_context()
+        scope = registry.current_scope_key()
+        plugin.register(ctx)
+        entry, loader = registry.snapshot_registration("discord", scope=scope)
+        assert loader is None
         assert "hermes_discord_thread_ownership" in entry.adapter_factory.__module__
 
-    def test_register_does_not_import_the_discord_adapter(self):
-        """Deferred: plugin discovery runs on nearly every hermes invocation.
-
-        Checked in a cold subprocess — importing the Discord adapter costs
-        ~1-2s, and doing it from ``register()`` would put that cost on plain
-        ``hermes chat``.
-        """
-        script = f"""
-import importlib.util, json, sys, types
-sys.path.insert(0, {str(HERMES_ROOT)!r})
-ns = types.ModuleType("hp"); ns.__path__ = []; sys.modules["hp"] = ns
-spec = importlib.util.spec_from_file_location(
-    "hp.plugin", {str(PLUGIN_DIR / "__init__.py")!r},
-    submodule_search_locations=[{str(PLUGIN_DIR)!r}])
-m = importlib.util.module_from_spec(spec)
-m.__package__ = "hp.plugin"; m.__path__ = [{str(PLUGIN_DIR)!r}]
-sys.modules["hp.plugin"] = m
-spec.loader.exec_module(m)
-
-class Ctx:
-    def register_platform(self, **kw): pass
-m.register(Ctx())
-
-from gateway.platform_registry import platform_registry
-print(json.dumps({{
-    "imported": [k for k in sys.modules if k.startswith("plugins.platforms.discord")],
-    "discord_imported": "discord" in sys.modules,
-    "registered": platform_registry.is_registered("discord"),
-}}))
-"""
-        out = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            text=True,
-            cwd=str(HERMES_ROOT),
-        )
-        assert out.returncode == 0, out.stderr
-        result = json.loads(out.stdout.strip().splitlines()[-1])
-        assert result["imported"] == []
-        assert result["discord_imported"] is False
-        assert result["registered"] is True
 
     def test_factory_builds_the_custom_adapter(self, registry, plugin_context, tmp_path):
         from gateway.config import PlatformConfig
@@ -240,9 +200,9 @@ class TestVersionCompatibilityGate:
         self, registry, plugin_context
     ):
         registry._entries.pop("discord", None)
-        plugin.register(plugin_context())
         with patch.object(plugin.compat, "probe", return_value=_unsupported()):
-            entry = registry.get("discord")
+            plugin.register(plugin_context())
+        entry = registry.get("discord")
         assert entry is not None
         assert "hermes_discord_thread_ownership" not in entry.adapter_factory.__module__
         assert entry.required_env == ["DISCORD_BOT_TOKEN"]
@@ -251,11 +211,10 @@ class TestVersionCompatibilityGate:
         self, registry, plugin_context, caplog
     ):
         registry._entries.pop("discord", None)
-        plugin.register(plugin_context())
         with caplog.at_level(logging.ERROR), patch.object(
             plugin.compat, "probe", return_value=_unsupported()
         ):
-            registry.get("discord")
+            plugin.register(plugin_context())
         errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
         assert errors
         assert "_discord_message_admission" in caplog.text
@@ -277,9 +236,9 @@ class TestVersionCompatibilityGate:
         import plugins.platforms.discord.adapter as builtin
 
         registry._entries.pop("discord", None)
-        plugin.register(plugin_context())
         with patch.object(builtin, "_apply_yaml_config", None):
-            entry = registry.get("discord")
+            plugin.register(plugin_context())
+        entry = registry.get("discord")
         assert "hermes_discord_thread_ownership" not in entry.adapter_factory.__module__
 
 
@@ -307,9 +266,9 @@ class TestFallback:
     ):
         """Our loader displaced the bundled one, so it must not leave a hole."""
         registry._entries.pop("discord", None)
-        plugin.register(plugin_context())
         with patch.object(plugin, "_CapturingContext", side_effect=RuntimeError("boom")):
-            entry = registry.get("discord")
+            plugin.register(plugin_context())
+        entry = registry.get("discord")
         assert entry is not None
         assert "hermes_discord_thread_ownership" not in entry.adapter_factory.__module__
         assert entry.required_env == ["DISCORD_BOT_TOKEN"]
