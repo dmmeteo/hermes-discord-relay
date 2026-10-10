@@ -443,3 +443,7 @@ by `tests/test_compat.py`.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## For agents
+
+Coding agents start at [AGENTS.md](AGENTS.md).
