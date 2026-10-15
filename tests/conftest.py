@@ -99,27 +99,23 @@ def plugin():
 
 
 @pytest.fixture
-def registry():
-    """The real platform registry, restored after each test."""
-    from gateway.platform_registry import platform_registry
+def registry(monkeypatch):
+    """Isolate each test with a fresh real registry, including scoped state."""
+    import gateway.platform_registry as host
 
-    entries = dict(platform_registry._entries)
-    deferred = dict(platform_registry._deferred)
-    try:
-        yield platform_registry
-    finally:
-        platform_registry._entries = entries
-        platform_registry._deferred = deferred
+    registry = host.PlatformRegistry()
+    monkeypatch.setattr(host, "platform_registry", registry)
+    return registry
 
 
 @pytest.fixture
-def plugin_context():
+def plugin_context(registry):
     """A real ``PluginContext`` bound to this plugin's manifest."""
 
-    def _make(name: str = "hermes-discord-thread-ownership", source: str = "user"):
-        from unittest.mock import MagicMock
+    managers = []
 
-        from hermes_cli.plugins import PluginContext, PluginManifest
+    def _make(name: str = "hermes-discord-thread-ownership", source: str = "user"):
+        from hermes_cli.plugins import PluginContext, PluginManager, PluginManifest
 
         manifest = PluginManifest(
             name=name,
@@ -130,8 +126,10 @@ def plugin_context():
             source=source,
             kind="platform",
         )
-        manager = MagicMock()
-        manager._plugin_platform_names = set()
+        manager = PluginManager(scope_key=registry.current_scope_key())
+        managers.append(manager)
         return PluginContext(manifest, manager)
 
-    return _make
+    yield _make
+    for manager in reversed(managers):
+        manager.unload()

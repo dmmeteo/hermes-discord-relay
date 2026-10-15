@@ -103,9 +103,11 @@ class TestInstallerContract:
         assert _read_manifest(PLUGIN_DIR)["name"] == PLUGIN_NAME
 
     def test_the_manifest_version_is_one_the_installer_supports(self):
-        from hermes_cli.plugins_cmd import _SUPPORTED_MANIFEST_VERSION
+        from hermes_cli.plugins_cmd import PluginOperationError, _check_manifest_version
 
-        assert MANIFEST["manifest_version"] <= _SUPPORTED_MANIFEST_VERSION
+        _check_manifest_version(MANIFEST, PLUGIN_NAME)
+        with pytest.raises(PluginOperationError, match="manifest_version"):
+            _check_manifest_version({**MANIFEST, "manifest_version": 9999}, PLUGIN_NAME)
 
     def test_the_install_directory_name_comes_from_the_manifest(self, tmp_path):
         """A name the sanitiser rejects would fail the install outright."""

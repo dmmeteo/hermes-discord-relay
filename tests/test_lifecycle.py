@@ -12,6 +12,7 @@ from conftest import HERMES_ROOT, PLUGIN_DIR
 @pytest.mark.parametrize("materialized", [False, True])
 def test_override_is_owned_by_the_profile_lifecycle(tmp_path, materialized):
     script = textwrap.dedent(f"""
+        import inspect
         import logging
         import sys
         from pathlib import Path
@@ -26,6 +27,7 @@ def test_override_is_owned_by_the_profile_lifecycle(tmp_path, materialized):
             with _plugin_home_scope(owner.home_path):
                 return registry.get('discord')
 
+        print('runtime:', sys.executable, sys.version, flush=True)
         logging.basicConfig(level=logging.INFO)
         root = Path({str(PLUGIN_DIR)!r})
         core = Path({str(HERMES_ROOT)!r})
@@ -52,11 +54,13 @@ def test_override_is_owned_by_the_profile_lifecycle(tmp_path, materialized):
         assert registry.snapshot_registration('discord') == (None, None), (
             'plugin leaked a process-global registration')
         other_entry = lookup(other)
-        assert other_entry.adapter_factory.__module__ == 'hermes_plugins.discord_platform.adapter'
+        assert other_entry.adapter_factory.__name__ == 'DiscordAdapter'
+        assert Path(inspect.getfile(other_entry.adapter_factory)).resolve() == builtin_dir / 'adapter.py'
         assert manager.unload(custom.name)
         assert registry.snapshot_registration('discord', scope=manager.scope_key) == before
         restored = lookup(manager)
-        assert restored.adapter_factory.__module__ == 'hermes_plugins.discord_platform.adapter'
+        assert restored.adapter_factory.__name__ == 'DiscordAdapter'
+        assert Path(inspect.getfile(restored.adapter_factory)).resolve() == builtin_dir / 'adapter.py'
         assert lookup(other) is other_entry
         manager._load_plugin(custom)
         assert 'hermes_discord_thread_ownership' in lookup(manager).adapter_factory.__module__
