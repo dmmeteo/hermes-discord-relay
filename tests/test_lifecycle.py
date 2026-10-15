@@ -11,6 +11,10 @@ from conftest import HERMES_ROOT, PLUGIN_DIR
 
 @pytest.mark.parametrize("materialized", [False, True])
 def test_override_is_owned_by_the_profile_lifecycle(tmp_path, materialized):
+    # Acceptance runs with 25% CPU, so cold imports need a larger wall deadline.
+    for home in (tmp_path / "home", tmp_path / "other"):
+        home.mkdir()
+        (home / "config.yaml").write_text("plugins:\n  load_timeout_seconds: 60\n")
     script = textwrap.dedent(f"""
         import inspect
         import logging
@@ -21,10 +25,11 @@ def test_override_is_owned_by_the_profile_lifecycle(tmp_path, materialized):
         from gateway.platform_registry import platform_registry as registry
         from hermes_cli.plugins import PluginManager
         from hermes_cli.plugins_manifest import parse_manifest_file
-        from hermes_cli.plugins_loader import _plugin_home_scope
+        from hermes_cli.plugins_loader import _plugin_home_scope, _resolve_plugin_load_timeout
 
         def lookup(owner):
             with _plugin_home_scope(owner.home_path):
+                assert _resolve_plugin_load_timeout() == 60
                 return registry.get('discord')
 
         print('runtime:', sys.executable, sys.version, flush=True)
@@ -73,7 +78,7 @@ def test_override_is_owned_by_the_profile_lifecycle(tmp_path, materialized):
     env = dict(os.environ, HERMES_HOME=str(tmp_path / "home"))
     result = subprocess.run(
         [sys.executable, "-c", script], env=env, cwd=tmp_path,
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, timeout=180,
     )
     print(result.stdout + result.stderr)
     assert result.returncode == 0, result.stdout + result.stderr
