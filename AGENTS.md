@@ -15,7 +15,7 @@ After compaction or context loss, re-read this file, the behaviour table, the se
 
 ## Revision state
 
-This checkout is local `main`. Public `main` is one commit ahead (`4547de4`), which registers the Discord override through the plugin context during `register()`. Here `register()` in `__init__.py` still installs a deferred loader through `platform_registry.register_deferred`. That public commit states that, on current Hermes, a deferred call to `ctx.register_platform()` escapes the plugin lifecycle and can leave the built-in adapter in use. Do not describe the plugin-scope registration as present in this revision. Reconciling this branch with public `main` is an owner decision.
+This local candidate reconciles public registration fix `4547de4` with the existing local documentation. `register()` now calls `ctx.register_platform()` within the host-owned plugin lifecycle. Stock Hermes v0.22.0 lifecycle and behavioral tests pass; no live install or guild acceptance is claimed. See [the registration decision](docs/adr/0001-plugin-scoped-registration.md) before changing registration timing. The canonical branch and live profiles are unchanged.
 
 ## Routes
 

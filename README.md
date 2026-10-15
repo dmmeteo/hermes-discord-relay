@@ -81,6 +81,21 @@ and restart the gateway:
 hermes gateway restart
 ```
 
+### Local source candidate
+
+Registration source candidate `b2611f83e59c6b82332280fe8c80859d9391f949` on
+`prime/audit-1015-discord` reconciles public fix `4547de4` with this branch's
+existing behavior and documentation. Its full suite passes on stock Hermes
+v0.22.0 (`e06df9c2eae6901f4c88f464e0ae6e753c0428b8`) with Python 3.14.7.
+This is a local candidate, not a new public release or a deployment. Live guild
+acceptance remains pending in the [outcome checklist](planning/next-epics.md).
+
+The source rollback target is `d02ad1a607ec719bfa63f8ecc9bc06913ca26d10`.
+It restores the known deferred-registration failure on v0.22.0. For a later
+authorized rollout, disabling the plugin restores stock Discord on the next
+gateway start, as described under [Update and rollback](#update-and-rollback).
+No runtime rollback is needed for this source-only task.
+
 ### Several profiles
 
 Each profile is an independent island with its own `HERMES_HOME`, its own
@@ -313,19 +328,16 @@ A separate ID such as `discord-custom` is not safe in this codebase:
   mode, thread routing, reply mode, the channel directory, the relay,
   `send_message`, cron delivery. All would silently skip a new ID.
 
-Registering over `discord` is a supported registry operation:
-`PlatformRegistry.register()` is last-writer-wins, and `register_deferred`
-replaces a pending loader for the same name. The plugin name, the adapter class
-and the config key carry the distinct identity instead — the places an operator
-actually reads. `PLATFORM_ID` is a single constant in `__init__.py`.
+Registering over `discord` is a supported registry operation. The plugin calls
+`ctx.register_platform()` during `register()`, so Hermes records the override in
+the owning profile's lifecycle ledger. Unloading the plugin restores the entry
+or deferred loader it displaced. The platform ID remains `discord`.
 
-**The override is itself deferred.** `register()` installs a loader and imports
-nothing heavy; the built-in adapter is imported the first time something asks
-the registry for the Discord platform (gateway start, cron delivery,
-`hermes setup`, `send_message`). This matters because user platform plugins are
-loaded *eagerly* during plugin discovery, and discovery runs on nearly every
-`hermes` invocation — importing the Discord adapter there would add 1–2s to
-plain `hermes chat`.
+A plugin-managed deferred loader can sit outside that ledger and lose to the
+profile's bundled Discord entry. The override therefore materializes during
+`register()`; Hermes controls when the platform plugin itself loads. See the
+[registration decision](docs/adr/0001-plugin-scoped-registration.md) for the
+historical evidence and tradeoff.
 
 ---
 

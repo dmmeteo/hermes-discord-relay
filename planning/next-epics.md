@@ -1,6 +1,6 @@
 # Next epics
 
-The only outcome checklist for this repository. Statuses describe this checkout (local `main`) and say where public `main` differs. Implemented code is not runtime verification or user acceptance. An item is checked only after its completion condition is verified. Candidates are not selected and are not permission to implement.
+The only outcome checklist for this repository. Statuses describe this local candidate. Implemented code is not runtime verification or user acceptance. An item is checked only after its completion condition is verified. Candidates are not selected and are not permission to implement.
 
 ## Delivered baseline
 
@@ -9,7 +9,7 @@ This revision implements the opt-in ingress filter described in [README.md](../R
 ## Outcomes
 
 - [ ] **The override takes effect on current Hermes.**
-  - Status: not in this revision. Public `main` registers the override through the plugin context during `register()` (`4547de4`). Here `register()` defers it through `platform_registry.register_deferred`, which that commit says can leave the built-in adapter in use on current Hermes. Bringing the fix here is an owner decision about reconciling this branch.
+  - Status: source reconciled with public fix `4547de4`. Verified on stock Hermes v0.22.0/Python 3.14.7 through the real loader, registry, profile isolation, unload/reload and existing ownership/admission tests. No live gateway or guild check was run; this outcome remains open. The source-only reconciliation is authorized by the owner assignment of 2026-10-15.
   - Done when: on current Hermes with the feature enabled, the gateway log shows `thread ownership adapter registered`, and in a guild thread only the owner answers an unmentioned human message.
   - Fails if: the feature is enabled but the built-in adapter handles the thread without an `ERROR` that names the cause.
   - Reference: [Hermes compatibility](../README.md#hermes-compatibility).
