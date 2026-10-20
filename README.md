@@ -8,8 +8,8 @@ model instructions govern the sender's stop and the recipient's report.
 
 Both features are opt-in per profile. Relay is configured independently under
 `discord.relay`. Existing `discord.thread_ownership_transfer` configuration and
-the per-profile ownership and receipt stores remain compatible. The source
-candidate uses the new install name `hermes-discord-relay`. Existing installs
+the per-profile ownership and receipt stores remain compatible. The public source
+uses the install name `hermes-discord-relay`. Existing installs
 need the [reversible identity migration](docs/migrate-to-discord-relay.md).
 
 The plugin subclasses the built-in Discord adapter. Connection, voice, slash
@@ -57,7 +57,7 @@ of execution. The plugin does not synchronize servers or channels, impersonate
 human approval, or transfer Discord's native thread owner.
 
 See the [landing-page copy](docs/landing-page.md) for the public description
-prepared for later website integration.
+integrated into the website source at `/discord-relay/`. Site publication is separate.
 
 ## The problem
 
@@ -94,11 +94,10 @@ ingress admission filter.
 
 ## Install
 
-The planned canonical repository is
+The canonical repository is
 [dmmeteo/hermes-discord-relay](https://github.com/dmmeteo/hermes-discord-relay).
-This source checkpoint prepares that name. The public repository rename and
-publication have not happened. The commands below apply **after publication**
-and are not a claim that the new URL is available now.
+The repository is public. Native installation and live activation are separate
+checks; a successful clone or CLI exit alone does not prove activation.
 
 ```bash
 hermes plugins install dmmeteo/hermes-discord-relay

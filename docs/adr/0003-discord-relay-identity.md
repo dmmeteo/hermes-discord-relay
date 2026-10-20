@@ -1,13 +1,13 @@
 # Rename the source identity without renaming Discord state
 
-Status: accepted for the local source candidate, 2026-10-21. Publication, native
-installer qualification, and live migration remain pending.
+Status: accepted for the local source candidate, 2026-10-21. The repository rename and source publication are complete. Native installer
+qualification and live migration remain separate acceptance gates.
 
 ## Context
 
 The owner selected Discord Relay and the canonical public repository
 [dmmeteo/hermes-discord-relay](https://github.com/dmmeteo/hermes-discord-relay).
-The repository rename is a later manager action. Hermes uses the manifest name
+The manager completed the repository rename and published the source. Hermes uses the manifest name
 for both the plugin install directory and activation key. Changing just the
 public copy leaves the old technical identity in every profile. Installing both
 identities can register two overrides for platform `discord`.

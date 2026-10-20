@@ -1,0 +1,13 @@
+# Lint configuration stays outside pyproject.toml so Hermes PM does not
+# treat this directory-loaded plugin as a Python workspace package.
+line-length = 100
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "E402",
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["E501"]

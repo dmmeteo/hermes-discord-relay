@@ -1,15 +1,15 @@
 # Discord Relay
 
-Editorial content source for later integration into the owner's existing site.
-This file does not publish a page. The canonical repository link below is
-prepared for the authorized rename and remains pending publication.
+Accepted editorial source for the owner's website. The page is integrated in
+website source at `/discord-relay/`; this file does not publish that site.
+The canonical repository is public.
 
 ## Page metadata
 
 - Title: Discord Relay for Hermes
 - Description: Give a Hermes bot ownership of a Discord conversation. Let an explicitly trusted bot pass one request into an allowed existing thread.
-- Proposed page path: `/things/discord-relay/`
-- Primary link after publication: [View source on GitHub](https://github.com/dmmeteo/hermes-discord-relay)
+- Proposed page path: `/discord-relay/`
+- Primary link: [View source on GitHub](https://github.com/dmmeteo/hermes-discord-relay)
 - Documentation: [Receiver and sender guide](../README.md#configure-a-receiver)
 
 ## Hero
@@ -65,21 +65,12 @@ Discord Relay inherits the native Discord connection and tools. It creates no
 new Discord bot, makes no Discord API calls of its own, and does not synchronize
 servers or channels.
 
-Version 1.1.0 is a local source candidate. Public rename, release, site
-publication, installation into live profiles, and live guild acceptance remain
-pending. Existing installs have a reversible identity migration recipe that
+Version 1.1.0 is public source. Release tagging, site publication, installation
+into live profiles, and live guild acceptance require separate verification. Existing installs have a reversible identity migration recipe that
 preserves their Discord configuration and per-profile stores.
 
-## Integration locations observed read-only
+## Website integration
 
-The existing site is `dmmeteo/bullshitai.dev`, with local checkout
-`/home/me/projects/dmmeteo.github.io`. Its `site/data/systems.yaml` currently says
-"Discord thread ownership" in the Hermes plugins blurb. No dedicated Discord
-ownership or relay page was found in the remote tree examined for this source
-checkpoint. The likely integration follows `site/content/things/`, alongside
-existing Hermes pages. `/things/discord-relay/` is a proposed path, not a live URL.
-
-The other candidate, `dmmeteo/dimaforcepush-site`, exposes repository metadata
-and a `main` branch, but its root contents response is empty and its recursive
-`main` tree request returns 404. It supplied no existing page to update.
-Neither site repository was edited.
+The site is `dmmeteo/bullshitai.dev`. Its assigned task worktree contains
+`site/content/things/discord-relay.md`, served at `/discord-relay/`, with a
+crawlable systems index link. Local preview checks do not establish publication.

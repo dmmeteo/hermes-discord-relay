@@ -3,9 +3,10 @@
 This is a reversible **source migration candidate**, tested in disposable homes.
 It is not a live migration or native installer acceptance. The new manifest name
 is `hermes-discord-relay`. The former name is `hermes-discord-thread-ownership`.
-The planned public source is
+The public source is
 [dmmeteo/hermes-discord-relay](https://github.com/dmmeteo/hermes-discord-relay).
-The repository rename and publication remain pending.
+The repository rename and source publication are complete. Native installer
+qualification and live profile migration require their own evidence.
 
 ## Preserve the compatibility boundary
 
