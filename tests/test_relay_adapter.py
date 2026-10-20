@@ -514,7 +514,8 @@ def test_bot_cannot_claim_ownership_via_relay(tmp_path, monkeypatch):
     )
     _admit(adapter, claim)
     assert adapter._ownership_store.owner_of("77") == "3000"
-    assert _admit(adapter, relay_message())
+    assert not _admit(adapter, relay_message())
+    assert not adapter._relay_receipts.path.exists()
     assert adapter._ownership_store.owner_of("77") == "3000"
 
 
@@ -532,4 +533,44 @@ def test_truthy_ownership_env_cannot_enable_relay_or_reset_handoff_guards(tmp_pa
     )
     assert not _admit(adapter, relay_message())
     assert adapter._ownership_config().bot_handoff == "off"
+    assert not adapter._relay_receipts.path.exists()
+
+
+def test_gateway_refusal_or_missing_check_does_not_spend_receipt(receiver):
+    receiver.set_authorization_check(None)
+    assert not _admit(receiver, relay_message())
+    assert not receiver._relay_receipts.path.exists()
+    receiver.set_authorization_check(lambda *args, **kwargs: False)
+    assert not _admit(receiver, relay_message(message_id=101))
+    assert not receiver._relay_receipts.path.exists()
+
+
+@pytest.mark.parametrize("relay_enabled", [False, True])
+def test_literal_relay_in_owner_handoff_is_observed_without_relay_admission(tmp_path, relay_enabled):
+    adapter = _make_adapter(tmp_path, {
+        "relay": relay_config() if relay_enabled else False,
+        "thread_ownership_transfer": True,
+    })
+    _admit(adapter, _message(author=_user(9001), content="<@2000>",
+                            mentions=[_user(2000, bot=True)], message_id=1))
+    message = relay_message(message_id=2)
+    message.content = "[[handoff]] <@1000> Review the literal [[relay protocol."
+    _admit(adapter, message)
+    assert adapter._ownership_store.owner_of("77") == "1000"
+    assert not adapter._relay_receipts.path.exists()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("prefix", ["", "> ", "```"])
+def test_quoted_or_malformed_relay_never_transfers_in_mention_handoff_mode(tmp_path, enabled, prefix):
+    adapter = _make_adapter(tmp_path, {
+        "relay": relay_config() if enabled else False,
+        "thread_ownership_transfer": {"enabled": True, "bot_handoff": "mention"},
+    })
+    _admit(adapter, _message(author=_user(9001), content="<@2000>",
+                            mentions=[_user(2000, bot=True)], message_id=1))
+    message = relay_message(message_id=2)
+    message.content = prefix + message.content.replace("hop=1", "hop=2")
+    assert not _admit(adapter, message)
+    assert adapter._ownership_store.owner_of("77") == "2000"
     assert not adapter._relay_receipts.path.exists()
