@@ -62,7 +62,7 @@ class TestRegistryOverride:
             "discord", scope=registry.current_scope_key()
         )
         assert loader is None
-        assert "hermes_discord_thread_ownership" in entry.adapter_factory.__module__
+        assert "hermes_discord_relay" in entry.adapter_factory.__module__
         assert registry.snapshot_registration("discord") == (None, None)
 
     def test_factory_builds_the_custom_adapter(self, registry, plugin_context, tmp_path):
@@ -107,12 +107,12 @@ class TestRegistryOverride:
         before = registry.get("discord").adapter_factory
         after = _register_now(plugin_context()).adapter_factory
         assert before is not after
-        assert "hermes_discord_thread_ownership" in after.__module__
+        assert "hermes_discord_relay" in after.__module__
 
     def test_entry_is_marked_as_a_plugin_source(self, registry, plugin_context):
         entry = _register_now(plugin_context())
         assert entry.source == "plugin"
-        assert entry.plugin_name == "hermes-discord-thread-ownership"
+        assert entry.plugin_name == "hermes-discord-relay"
 
 
 # ── inheritance of the built-in entry ───────────────────────────────────────
@@ -203,7 +203,7 @@ class TestVersionCompatibilityGate:
             plugin.register(plugin_context())
         entry = registry.get("discord")
         assert entry is not None
-        assert "hermes_discord_thread_ownership" not in entry.adapter_factory.__module__
+        assert "hermes_discord_relay" not in entry.adapter_factory.__module__
         assert entry.required_env == ["DISCORD_BOT_TOKEN"]
 
     def test_an_unsupported_core_is_reported_at_error_level(
@@ -229,7 +229,7 @@ class TestVersionCompatibilityGate:
         ):
             plugin.register(plugin_context())
         entry = registry.get("discord")
-        assert "hermes_discord_thread_ownership" in entry.adapter_factory.__module__
+        assert "hermes_discord_relay" in entry.adapter_factory.__module__
         assert "_get_allow_bots" in caplog.text
         assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
 
@@ -241,7 +241,7 @@ class TestVersionCompatibilityGate:
         with patch.object(builtin, "_apply_yaml_config", None):
             plugin.register(plugin_context())
         entry = registry.get("discord")
-        assert "hermes_discord_thread_ownership" not in entry.adapter_factory.__module__
+        assert "hermes_discord_relay" not in entry.adapter_factory.__module__
 
 
 # ── failure isolation ───────────────────────────────────────────────────────
@@ -255,7 +255,7 @@ class TestFallback:
             plugin.register(plugin_context())
         entry = registry.get("discord")
         assert entry is not None
-        assert "hermes_discord_thread_ownership" not in entry.adapter_factory.__module__
+        assert "hermes_discord_relay" not in entry.adapter_factory.__module__
         assert entry.required_env == ["DISCORD_BOT_TOKEN"]
 
     def test_register_never_raises(self, registry, plugin_context, caplog):

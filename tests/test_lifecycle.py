@@ -53,9 +53,9 @@ def test_override_is_owned_by_the_profile_lifecycle(tmp_path, materialized):
         assert loaded.enabled and not loaded.error, loaded.error
         entry = lookup(manager)
         print('selected factory:', entry.adapter_factory.__module__, flush=True)
-        assert 'hermes_discord_thread_ownership' in entry.adapter_factory.__module__, (
+        assert 'hermes_discord_relay' in entry.adapter_factory.__module__, (
             'enabled ownership plugin did not replace the built-in adapter')
-        assert entry.plugin_name == 'hermes-discord-thread-ownership'
+        assert entry.plugin_name == 'hermes-discord-relay'
         assert registry.snapshot_registration('discord') == (None, None), (
             'plugin leaked a process-global registration')
         other_entry = lookup(other)
@@ -68,7 +68,7 @@ def test_override_is_owned_by_the_profile_lifecycle(tmp_path, materialized):
         assert Path(inspect.getfile(restored.adapter_factory)).resolve() == builtin_dir / 'adapter.py'
         assert lookup(other) is other_entry
         manager._load_plugin(custom)
-        assert 'hermes_discord_thread_ownership' in lookup(manager).adapter_factory.__module__
+        assert 'hermes_discord_relay' in lookup(manager).adapter_factory.__module__
         manager.unload()
         other.unload()
         assert registry.snapshot_registration('discord', scope=manager.scope_key) == (None, None)

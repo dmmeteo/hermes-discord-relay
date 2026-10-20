@@ -32,14 +32,14 @@ PLUGIN_NAME = MANIFEST["name"]
 #: directory is irrelevant to both (the installer derives the install path from
 #: the manifest, never from the clone's directory name), so it is deliberately
 #: not asserted on.
-REPO_SLUG = "dmmeteo/hermes-discord-thread-ownership"
+REPO_SLUG = "dmmeteo/hermes-discord-relay"
 
 README = (PLUGIN_DIR / "README.md").read_text(encoding="utf-8")
 
 #: Everything the installed copy needs at runtime.  Anything the package
 #: imports must be here, or discovery fails with an ImportError.
 RUNTIME_MODULES = ("__init__.py", "adapter.py", "compat.py", "config_bridge.py",
-                   "ownership.py")
+                   "ownership.py", "relay.py")
 
 
 @pytest.fixture

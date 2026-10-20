@@ -84,7 +84,7 @@ def test_native_lifecycle_dispatch_and_compatible_old_config(tmp_path):
             with _plugin_home_scope(manager.home_path):
                 entry = registry.get('discord')
                 assert entry.plugin_name == custom.name
-                assert 'hermes_discord_thread_ownership' in entry.adapter_factory.__module__
+                assert 'hermes_discord_relay' in entry.adapter_factory.__module__
                 asyncio.run(dispatch(entry, repeated=repeated))
             assert manager.unload(custom.name)
             assert registry.snapshot_registration('discord', scope=manager.scope_key) == before

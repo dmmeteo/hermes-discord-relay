@@ -31,7 +31,7 @@ PLUGIN_DIR = Path(__file__).resolve().parents[1]
 #: Mirrors ``hermes_cli.plugins._NS_PARENT`` and the manifest-name slug rule
 #: (``key.replace("/", "__").replace("-", "_")``).
 NS_PARENT = "hermes_plugins"
-PLUGIN_SLUG = "hermes_discord_thread_ownership"
+PLUGIN_SLUG = "hermes_discord_relay"
 PKG_NAME = f"{NS_PARENT}.{PLUGIN_SLUG}"
 
 
@@ -114,7 +114,7 @@ def plugin_context(registry):
 
     managers = []
 
-    def _make(name: str = "hermes-discord-thread-ownership", source: str = "user"):
+    def _make(name: str = "hermes-discord-relay", source: str = "user"):
         from hermes_cli.plugins import PluginContext, PluginManager, PluginManifest
 
         manifest = PluginManifest(

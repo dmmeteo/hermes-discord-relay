@@ -4,14 +4,13 @@
 # directory name under ~/.hermes/plugins/, and `hermes plugins enable` matches
 # on it.  Keep it identical to the repository name.
 manifest_version: 1
-name: hermes-discord-thread-ownership
+name: hermes-discord-relay
 kind: platform
 version: 1.1.0
 description: >
-  Discord Relay adds opt-in trusted bot requests to existing guild threads and
-  compatible single-owner thread admission. Uses the native Discord adapter,
-  preserves bot provenance and downstream authorization, and registers under
-  the existing discord platform ID. Install identity remains unchanged.
+  Opt-in conversation ownership by one Hermes bot, plus requests from explicitly
+  trusted bots to allowed existing Discord threads. Preserves bot identity and
+  native human authorization.
 author: dmmeteo
 requires_env:
   - name: DISCORD_BOT_TOKEN

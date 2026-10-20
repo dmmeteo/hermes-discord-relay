@@ -1,4 +1,4 @@
-"""Discord Relay, installed as hermes-discord-thread-ownership.
+"""Discord Relay for Hermes.
 
 A thin override of the built-in Discord platform adapter.  Everything else —
 connection, voice, slash commands, media, auth, reactions, threads, cron
@@ -60,7 +60,7 @@ class _CapturingContext:
         def _recorder(*args, **kwargs):
             self.unexpected_calls.append(name)
             logger.warning(
-                "hermes-discord-thread-ownership: the built-in Discord "
+                "hermes-discord-relay: the built-in Discord "
                 "register() called ctx.%s(), which this plugin does not "
                 "forward. That registration is dropped for the Discord "
                 "platform; the plugin needs updating.",
@@ -89,7 +89,7 @@ def _install_override(ctx) -> None:
     compat.require_supported(support)
     if support.missing_optional:
         logger.warning(
-            "hermes-discord-thread-ownership: %s. Ownership fallbacks remain "
+            "hermes-discord-relay: %s. Ownership fallbacks remain "
             "available; relay requires native bot-gate and dispatch hooks. "
             "See README 'Hermes compatibility'.",
             compat.describe(support),
@@ -110,7 +110,7 @@ def _install_override(ctx) -> None:
         # before that — and the capturing context forwards every kwarg, so the
         # right one comes across without this plugin having to name it.
         logger.info(
-            "hermes-discord-thread-ownership: discord.py is not installed yet; "
+            "hermes-discord-relay: discord.py is not installed yet; "
             "the inherited dependency hook will install it before first use"
         )
 
@@ -127,7 +127,7 @@ def _install_override(ctx) -> None:
     kwargs["apply_yaml_config_fn"] = apply_yaml_config
     ctx.register_platform(**kwargs)
     logger.info(
-        "hermes-discord-thread-ownership: thread ownership adapter registered "
+        "hermes-discord-relay: thread ownership adapter registered "
         "for '%s'",
         PLATFORM_ID,
     )
@@ -140,12 +140,12 @@ def _fall_back_to_builtin(ctx) -> None:
 
         builtin_register(ctx)
         logger.warning(
-            "hermes-discord-thread-ownership: override not installed; the "
+            "hermes-discord-relay: override not installed; the "
             "built-in Discord adapter is in use and Discord is unaffected"
         )
     except Exception:
         logger.error(
-            "hermes-discord-thread-ownership: override failed and the built-in "
+            "hermes-discord-relay: override failed and the built-in "
             "Discord adapter could not be registered either",
             exc_info=True,
         )
@@ -156,11 +156,11 @@ def register(ctx) -> None:
     try:
         _install_override(ctx)
     except compat.IncompatibleHermesError as exc:
-        logger.error("hermes-discord-thread-ownership: %s", exc)
+        logger.error("hermes-discord-relay: %s", exc)
         _fall_back_to_builtin(ctx)
     except Exception:
         logger.warning(
-            "hermes-discord-thread-ownership failed to install its override",
+            "hermes-discord-relay failed to install its override",
             exc_info=True,
         )
         _fall_back_to_builtin(ctx)

@@ -22,6 +22,13 @@ inside the profile-scoped lifecycle that Hermes owns. Native adapter, security,
 and lifecycle tests cover source behavior. Publication, tagging, profile
 installation, gateway restart, and live guild acceptance remain pending.
 The revision used by a live profile is not recorded here.
+The source manifest is now `hermes-discord-relay`. Existing technical config keys
+and state filenames remain unchanged. Read [the identity migration](docs/migrate-to-discord-relay.md)
+and [the identity decision](docs/adr/0003-discord-relay-identity.md)
+before changing install identity or activation metadata. The old-to-new and
+rollback checks use disposable homes; live migration and installer acceptance
+remain pending. [Landing copy](docs/landing-page.md) is a source artifact for later
+site integration.
 Read [the relay decision](docs/adr/0002-controlled-discord-relay.md) before
 changing relay admission, receipts, authorization, or acknowledgement behavior.
 Read [the registration decision](docs/adr/0001-plugin-scoped-registration.md)

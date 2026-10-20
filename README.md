@@ -1,13 +1,16 @@
 # Discord Relay
 
 A [Hermes](https://github.com/NousResearch/hermes-agent) Discord plugin for
-controlled bot requests and single-owner threads. A trusted sender sends one
-explicit request to an existing thread. The recipient works there and reports
-to the human, without starting a bot conversation.
+controlled bot requests and single-owner threads. A trusted sender can submit
+one explicit request to an existing thread. The recipient is instructed to work
+there and report to the human. Admission checks and receipts limit ingress;
+model instructions govern the sender's stop and the recipient's report.
 
 Both features are opt-in per profile. Relay is configured independently under
 `discord.relay`. Existing `discord.thread_ownership_transfer` configuration and
-the install name `hermes-discord-thread-ownership` remain compatible.
+the per-profile ownership and receipt stores remain compatible. The source
+candidate uses the new install name `hermes-discord-relay`. Existing installs
+need the [reversible identity migration](docs/migrate-to-discord-relay.md).
 
 The plugin subclasses the built-in Discord adapter. Connection, voice, slash
 commands, media, reactions, thread transport, and cron delivery remain native.
@@ -25,6 +28,36 @@ discord:
 ```
 
 ---
+
+## Two independent capabilities
+
+| Capability | Who can trigger it | What changes |
+|---|---|---|
+| Thread ownership | An authorized human mentions a Hermes bot | That bot owns the conversation in Hermes and handles unmentioned human follow-ups. |
+| Owner bot handoff | The current owner posts a guarded `[[handoff]] @OtherBot` | The other bot becomes the conversation owner. |
+| Relay | An explicitly trusted sender submits a valid request to an exact allowed existing thread | The recipient can accept one request. Ownership stays unchanged. |
+
+For example, Maya asks Scout to collect a question for Builder. Builder already
+owns thread `77` in guild `4242`, after Maya mentioned Builder there. Scout's
+bot ID is `2000` and Builder's is `1000`. Builder's profile allows only sender
+`2000` into that exact guild and thread, and native Hermes authorization also
+allows Scout's bot ID. Scout uses Hermes' native send tool to post one relay
+request there, then reports the transport status to Maya and stops. Builder
+receives Scout's bot identity, works within its existing permissions, and
+reports its result or blocker directly to Maya in thread `77`.
+
+Scout does not need to own Builder's thread. This route grants no reverse route
+from Builder to Scout. To transfer ownership instead, the current owner must
+use the configured handoff mechanism, or Maya must mention the new owner.
+
+The plugin enforces receiver admission, exact routes, replay protection, and
+preserved bot provenance. Sender stopping and the recipient's direct report
+are model instructions. They are not outbound tool restrictions or a promise
+of execution. The plugin does not synchronize servers or channels, impersonate
+human approval, or transfer Discord's native thread owner.
+
+See the [landing-page copy](docs/landing-page.md) for the public description
+prepared for later website integration.
 
 ## The problem
 
@@ -61,87 +94,59 @@ ingress admission filter.
 
 ## Install
 
-```bash
-hermes plugins install dmmeteo/hermes-discord-thread-ownership
-hermes plugins enable hermes-discord-thread-ownership
-```
-
-`hermes plugins install` clones this repository into
-`~/.hermes/plugins/hermes-discord-thread-ownership/` — which is why the
-repository root *is* the plugin package, with `plugin.yaml` and `__init__.py`
-at the top level. There is no install script to run and nothing to `pip
-install`.
-
-The install directory and the `plugins enable` key both come from
-`plugin.yaml`'s `name`, never from the directory a clone happens to sit in, so
-a local checkout may be called anything. The published slug is
-`dmmeteo/hermes-discord-thread-ownership`, and the manifest name matches it —
-`tests/test_install_layout.py` asserts both, and that every command in this
-README uses them.
-
-Then enable the feature in that profile's `config.yaml`:
-
-```yaml
-discord:
-  thread_ownership_transfer: true
-```
-
-and restart the gateway:
+The planned canonical repository is
+[dmmeteo/hermes-discord-relay](https://github.com/dmmeteo/hermes-discord-relay).
+This source checkpoint prepares that name. The public repository rename and
+publication have not happened. The commands below apply **after publication**
+and are not a claim that the new URL is available now.
 
 ```bash
-hermes gateway restart
+hermes plugins install dmmeteo/hermes-discord-relay
+hermes plugins enable hermes-discord-relay
 ```
+
+The manifest name sets the install directory and activation key. The repository
+root is the plugin package, with `plugin.yaml` and `__init__.py` at the top level.
+The new directory is `$HERMES_HOME/plugins/hermes-discord-relay/`. There is no
+install script or plugin dependency to install with pip. This reuses your
+existing Hermes Discord bot token and native Discord tools. It creates no bot.
+
+For an existing `hermes-discord-thread-ownership` install, do not enable a second
+copy alongside it. Follow the [migration and rollback guide](docs/migrate-to-discord-relay.md).
+It preserves the existing `discord:` configuration and state filenames while
+changing the plugin identity. Do not use a blanket replacement on profile files.
+
+Install and enable separately for each profile using `hermes -p PROFILE`.
+Each profile has its own `HERMES_HOME`, config, bot token, ownership cache, and
+receipt database. Restart a gateway only during a separately authorized rollout.
 
 ### Release status
 
 Version 1.1.0 adds Discord Relay. See the
-[release and migration notes](docs/releases/1.1.0.md) before enabling relay.
+[release notes](docs/releases/1.1.0.md) for compatibility and limits.
 Publication, tagging, profile installation, gateway restart, and live guild
-acceptance of this version remain pending. Offline tests verify native adapter,
-security, and lifecycle behavior; they do not prove live task completion.
+acceptance remain pending. Offline tests verify native adapter, security, and
+lifecycle behavior. They do not prove live task completion.
 
-### Several profiles
-
-Each profile is an independent island with its own `HERMES_HOME`, its own
-`plugins/` directory, its own `config.yaml` and its own bot token — so install
-and enable once per profile:
+### Update and disable after migration
 
 ```bash
-for p in default alpha beta; do
-  hermes -p "$p" plugins install dmmeteo/hermes-discord-thread-ownership
-  hermes -p "$p" plugins enable hermes-discord-thread-ownership
-  hermes -p "$p" gateway restart
-done
+hermes plugins update hermes-discord-relay
+hermes plugins disable hermes-discord-relay
 ```
 
-Ownership state is per-profile too, which is exactly right: each bot keeps its
-own view and they converge from the shared event stream.
-
-Verify the override took effect:
-
-```bash
-hermes gateway status     # Discord still listed, still connected
-grep 'thread ownership adapter registered' ~/.hermes/logs/gateway.log
-```
-
-### Update and rollback
-
-```bash
-hermes plugins update hermes-discord-thread-ownership
-hermes plugins disable hermes-discord-thread-ownership   # keep it installed
-hermes plugins remove  hermes-discord-thread-ownership   # uninstall
-```
-
-Disabling restores the bundled Discord adapter on the next gateway start;
-nothing else changes. To also clear ownership state, delete
-`$HERMES_HOME/discord_thread_ownership.json`.
+The update command requires a native installer-managed checkout after
+publication. The local source rehearsal in the migration guide does not create
+installer provenance. Disabling restores the bundled Discord adapter on the
+next gateway start. Keep both state files during disable, update, and rollback.
 
 ---
 
 ## Configuration
 
-Relay and ownership have separate opt-ins. Existing ownership-only profiles
-need no migration. Keep the native bot gate at `none` for relay-only bot ingress.
+Relay and ownership have separate opt-ins. Existing ownership settings need
+no schema migration. The plugin identity migration is separate. Keep the native
+bot gate at `none` for relay-only bot ingress.
 
 ### Configure a receiver
 
@@ -394,9 +399,9 @@ discord:
     bot_handoff: off
 ```
 
-The default is `marker` rather than `off` because agent-to-agent handoff is the
-second half of the feature, and the marker requirement already makes a handoff
-an explicit, greppable act rather than an accident of conversation.
+The ownership handoff default remains `marker`. The marker makes a handoff
+explicit while the ownership, cooldown, and hop guards limit admission.
+Set `bot_handoff: off` when you do not want owner-initiated bot handoff.
 
 ### Credential and config reuse
 
