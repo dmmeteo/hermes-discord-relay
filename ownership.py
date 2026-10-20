@@ -376,6 +376,14 @@ def _bot_event(
 ) -> tuple[str | None, str, str, ThreadState]:
     """A bot message: only the current owner can move ownership, once."""
     owner = state.owner_id
+    content = (facts.content or "").lower()
+    # Observe an explicit outbound handoff even when it discusses relay syntax.
+    # Envelopes and quoted relay text cannot become mention-mode ownership transfers.
+    if "[[relay" in content and (
+        content.startswith(("<@", ">", "`"))
+        or not content.startswith(config.handoff_marker.lower())
+    ):
+        return owner, "none", "relay_is_not_handoff", state
     if config.bot_handoff == "off":
         return owner, "none", "bot_handoff_disabled", state
     if facts.has_unresolved_mentions:

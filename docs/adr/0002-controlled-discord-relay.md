@@ -36,9 +36,29 @@ requires that hook and the native recovered-dispatch keyword. It never changes
 the global bot environment. The recovered path prevents native text coalescing
 from combining independently receipted requests. A copied message adds provenance
 and recipient instructions while preserving the original message and bot author.
+The native gateway sender-authorization callback must explicitly grant the bot
+source before reservation. With native bot mode none, role-only and channel-only
+adapter grants are refused without a receipt. Missing callback authorization fails closed.
 No role, upstream relay, or human authorization flag is granted. Hermes still
 checks authorization downstream. This Discord feature is distinct from Hermes'
 authenticated upstream relay transport.
+
+When ownership is enabled, the recipient must already own the destination
+thread. Relay cannot create or transfer ownership. With ownership off, native
+mention and multi-bot thread behavior remains in force. Ordinary owner handoffs
+that discuss literal relay syntax are observed by every profile, but malformed
+or quoted relay cannot fall through as an ownership mention transfer.
+
+Enabling relay intentionally denies ordinary bot messages, including mention
+pings, continuation chunks and DMs, even under native all/mentions. The sender
+must use native none or relay mode too. Sender stop and recipient no-redelegation
+remain model instructions. Native shared-session busy policy can interrupt a
+human run; per-user thread isolation creates separate sessions instead.
+
+Malformed relay configuration travels through the native YAML bridge unchanged
+and fails closed for bots at runtime. Human channel and authorization gates
+still apply. Recommend a 120-second sender TTL, at most 270 seconds with the
+full 30-second clock-skew tolerance. The upper expiry bound remains receiver time.
 
 No reliable bounded native admission acknowledgement was found. Do not send an
 acknowledgement or equate transport success with agent admission or completion.

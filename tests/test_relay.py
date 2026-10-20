@@ -154,3 +154,16 @@ def test_corrupt_receipt_database_raises_instead_of_starting_empty(tmp_path):
     path.write_text("corrupted")
     with pytest.raises(sqlite3.DatabaseError):
         reserve(relay.RelayReceiptStore(path))
+
+
+@pytest.mark.parametrize("skew", [-30, -0.5, 0, 30])
+@pytest.mark.parametrize("ttl", [120, 270])
+def test_recommended_ttl_tolerates_documented_clock_skew(skew, ttl):
+    sender_now = 1800000000
+    assert relay.RelayEnvelope.parse(content(expires=str(sender_now + ttl)),
+                                     now=sender_now + skew, created=sender_now) is not None
+
+
+def test_maximum_ttl_is_a_receiver_bound_without_upper_expiry_skew():
+    assert relay.RelayEnvelope.parse(content(expires="1800000300"),
+                                     now=1799999999.5, created=1800000000) is None

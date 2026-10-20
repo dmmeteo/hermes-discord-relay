@@ -57,6 +57,7 @@ def test_native_lifecycle_dispatch_and_compatible_old_config(tmp_path):
             adapter._client.get_user = lambda uid: None
             adapter._allowed_user_ids = {{'9001', '2000'}}
             adapter._allowed_role_ids = set()
+            adapter.set_authorization_check(lambda *args, **kwargs: True)
             adapter._ready_event.set()
             adapter._text_batch_delay_seconds = 10
             adapter._collect_attachment_media = AsyncMock(return_value=([], [], False, ''))

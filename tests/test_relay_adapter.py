@@ -2,7 +2,14 @@
 
 import time
 
-from test_adapter import BOT_B, SELF_ID, _admit, _make_adapter, _message, _user, adapter_mod
+from test_adapter import BOT_B, SELF_ID, _admit, _message, _user, adapter_mod
+from test_adapter import _make_adapter as _base_adapter
+
+
+def _make_adapter(tmp_path, extra=None):
+    adapter = _base_adapter(tmp_path, extra)
+    adapter.set_authorization_check(lambda *args, **kwargs: True)
+    return adapter
 
 
 def relay_config():
@@ -546,11 +553,13 @@ def test_gateway_refusal_or_missing_check_does_not_spend_receipt(receiver):
 
 
 @pytest.mark.parametrize("relay_enabled", [False, True])
-def test_literal_relay_in_owner_handoff_is_observed_without_relay_admission(tmp_path, relay_enabled):
+@pytest.mark.parametrize("observer_id", [1000, 2000])
+def test_literal_relay_in_owner_handoff_is_observed_without_relay_admission(tmp_path, relay_enabled, observer_id):
     adapter = _make_adapter(tmp_path, {
         "relay": relay_config() if relay_enabled else False,
         "thread_ownership_transfer": True,
     })
+    adapter._client.user = _user(observer_id, bot=True)
     _admit(adapter, _message(author=_user(9001), content="<@2000>",
                             mentions=[_user(2000, bot=True)], message_id=1))
     message = relay_message(message_id=2)
@@ -571,6 +580,292 @@ def test_quoted_or_malformed_relay_never_transfers_in_mention_handoff_mode(tmp_p
                             mentions=[_user(2000, bot=True)], message_id=1))
     message = relay_message(message_id=2)
     message.content = prefix + message.content.replace("hop=1", "hop=2")
+    assert not _admit(adapter, message)
+    assert adapter._ownership_store.owner_of("77") == "2000"
+    assert not adapter._relay_receipts.path.exists()
+
+
+def native_gateway_runtime():
+    import importlib
+    import socket
+    import sys
+    from types import ModuleType
+
+    # Entry-point bootstrap re-execs into a managed interpreter without pytest.
+    # Runtime policy below remains the real host implementation.
+    bootstrap = ModuleType("hermes_bootstrap")
+    bootstrap._happy_eyeballs_create_connection = socket.create_connection
+    previous = sys.modules.get("hermes_bootstrap")
+    sys.modules["hermes_bootstrap"] = bootstrap
+    try:
+        return importlib.import_module("gateway.run")
+    finally:
+        if previous is None:
+            sys.modules.pop("hermes_bootstrap", None)
+        else:
+            sys.modules["hermes_bootstrap"] = previous
+
+
+def gateway_for(receiver):
+    native_gateway_runtime()
+    from gateway.authz_mixin import GatewayAuthorizationMixin
+    from gateway.config import Platform
+    from gateway.run_adapters import GatewayAdapterLifecycleMixin
+
+    class Gateway(GatewayAdapterLifecycleMixin, GatewayAuthorizationMixin):
+        pass
+
+    gateway = Gateway()
+    gateway.config = SimpleNamespace(multiplex_profiles=False)
+    gateway.adapters = {Platform.DISCORD: receiver}
+    gateway._adapter_profile_for_source = lambda source: None
+    gateway._adapter_flag = lambda *args: False
+    gateway._pairing_store_for = lambda source: None
+    gateway._delivery_adapter_for = lambda source: receiver
+    gateway._adapter_extra_for_source = lambda source: receiver.config.extra
+    gateway._adapter_resolved_allowlist_ids = lambda source: set()
+    receiver.set_authorization_check(gateway._make_adapter_auth_check(Platform.DISCORD))
+    return gateway
+
+
+@pytest.mark.parametrize("grant,expected", [
+    ("role", False), ("channel", False), ("user", True), ("pairing", True),
+    ("global_user", True), ("denied", False), ("allow_all", True),
+])
+def test_real_gateway_callback_checks_bot_policy_before_receipts(receiver, monkeypatch, grant, expected):
+    from gateway.config import Platform
+    from gateway.session import SessionSource
+
+    for name in ("DISCORD_ALLOWED_USERS", "GATEWAY_ALLOWED_USERS", "DISCORD_ALLOW_ALL_USERS",
+                 "GATEWAY_ALLOW_ALL_USERS", "DISCORD_ALLOWED_ROLES", "DISCORD_ALLOWED_CHANNELS"):
+        monkeypatch.setenv(name, "")
+    del receiver.__dict__["_is_allowed_user"]
+    receiver._allowed_user_ids = set()
+    receiver._allowed_role_ids = set()
+    message = relay_message()
+    gateway = gateway_for(receiver)
+    if grant == "role":
+        receiver._allowed_role_ids = {123}
+        message.author.roles = [SimpleNamespace(id=123)]
+        message.author.guild = message.guild
+    elif grant == "channel":
+        receiver.config.extra["allowed_channels"] = ["77"]
+    elif grant == "user":
+        monkeypatch.setenv("DISCORD_ALLOWED_USERS", "9001,2000")
+        receiver._allowed_user_ids = {"9001", "2000"}
+    elif grant == "pairing":
+        from gateway.pairing import PairingStore
+
+        pairing = PairingStore()
+        code = pairing.generate_code("discord", "2000", "sender")
+        assert code is not None
+        assert pairing.approve_code("discord", code)["user_id"] == "2000"
+        # Exercise pairing itself even when its optional allowlist mirror is absent.
+        monkeypatch.setenv("DISCORD_ALLOWED_USERS", "")
+        gateway._pairing_store_for = lambda source: pairing
+    elif grant == "global_user":
+        monkeypatch.setenv("GATEWAY_ALLOWED_USERS", "2000")
+        receiver._allowed_user_ids = {"2000"}
+    elif grant == "allow_all":
+        monkeypatch.setenv("DISCORD_ALLOW_ALL_USERS", "true")
+    else:
+        receiver._allowed_user_ids = {"9001"}
+    source = SessionSource(platform=Platform.DISCORD, chat_id="77", chat_type="thread",
+                           thread_id="77", user_id="2000", is_bot=True, role_authorized=False)
+    assert gateway._is_user_authorized(source) is expected
+    if grant == "role":
+        source.role_authorized = True
+        assert gateway._is_user_authorized(source)
+        source.role_authorized = False
+        assert receiver._is_allowed_user("2000", message.author, guild=message.guild,
+                                         channel_ids={"77"})
+    if grant == "channel":
+        assert receiver._is_allowed_user("2000", message.author, guild=message.guild,
+                                         channel_ids={"77"})
+    assert _admit(receiver, message) is expected
+    assert receiver._relay_receipts.path.exists() is expected
+    assert bool(receiver._relay_pending) is expected
+    if not expected:
+        assert not receiver._dedup.contains(str(message.id))
+
+
+def test_native_recovered_dispatch_wraps_and_consumes_once(receiver):
+    async def exercise():
+        receiver._collect_attachment_media = AsyncMock(return_value=([], [], False, ""))
+        receiver._discord_history_backfill = lambda: False
+        receiver._threads.mark_async = AsyncMock()
+        receiver.handle_message = AsyncMock()
+        assert await receiver._dispatch_recovered_message(relay_message())
+        assert not receiver._relay_pending
+        assert not await receiver._dispatch_recovered_message(relay_message(message_id=101))
+        receiver.handle_message.assert_awaited_once()
+        assert "Discord Relay v1" in receiver.handle_message.call_args.args[0].text
+
+    asyncio.run(exercise())
+
+
+def test_receipt_path_uses_real_multiplex_runtime_scope(tmp_path):
+    from gateway.config import PlatformConfig
+    _profile_runtime_scope = native_gateway_runtime()._profile_runtime_scope
+
+    adapters = []
+    for name in ("a", "b"):
+        profile = tmp_path / name
+        profile.mkdir()
+        with _profile_runtime_scope(profile, prepared_secret_scope={}):
+            adapter = adapter_mod.DiscordCustomAdapter(PlatformConfig(enabled=True, token="offline"))
+            adapters.append(adapter)
+            assert adapter._relay_receipts.path == profile / relay_mod.STATE_FILENAME
+    assert adapters[0]._relay_receipts.path != adapters[1]._relay_receipts.path
+    assert adapters[0]._relay_receipts.path.parent == tmp_path / "a"
+
+
+def test_relay_debounce_does_not_admit_chunks_and_shares_human_session(receiver):
+    from copy import copy
+
+    from gateway.session import build_session_key
+
+    async def exercise():
+        receiver._ready_event.set()
+        receiver._text_batch_delay_seconds = 1
+        receiver._collect_attachment_media = AsyncMock(return_value=([], [], False, ""))
+        receiver._discord_history_backfill = lambda: False
+        receiver._threads.mark_async = AsyncMock()
+        receiver.handle_message = AsyncMock()
+        assert await receiver._dispatch_discord_message(relay_message())
+        event = receiver.handle_message.call_args.args[0]
+        assert event._bot_tag_debounce is True
+        assert not receiver._pending_text_batches
+        chunk = relay_message(message_id=101)
+        chunk.content = "unmentioned second chunk"
+        chunk.mentions = []
+        assert not await receiver._dispatch_discord_message(chunk)
+        human = copy(event.source)
+        human.user_id = "9001"
+        human.is_bot = False
+        assert build_session_key(event.source) == build_session_key(human)
+        assert build_session_key(event.source, thread_sessions_per_user=True) != build_session_key(
+            human, thread_sessions_per_user=True)
+        return event
+
+    event = asyncio.run(exercise())
+    from gateway.run_inbound import GatewayInboundMixin
+
+    async def busy():
+        gateway = GatewayInboundMixin()
+        agent = SimpleNamespace(interrupt=MagicMock())
+        gateway._hm_busy_slash_or_photo = AsyncMock(return_value=(False, None))
+        gateway._effective_busy_input_mode = lambda source: "interrupt"
+        gateway._hm_busy_telegram_grace_queue = lambda *args: False
+        gateway._peek_session_state = lambda key: SimpleNamespace(turn=SimpleNamespace(agent=agent))
+        gateway._draining = False
+        gateway._agent_has_active_subagents = lambda agent: False
+        gateway._session_has_compression_in_flight = AsyncMock(return_value=False)
+        gateway._pending_event_audio_paths = lambda event: []
+        gateway._hm_text_only = lambda event: True
+        await gateway._hm_handle_running_session_message(event, event.source, "thread-session")
+        agent.interrupt.assert_called_once_with(event.text)
+
+    asyncio.run(busy())
+
+
+def test_malformed_bridged_relay_keeps_human_channel_gates(tmp_path, monkeypatch):
+    from conftest import load_plugin_module
+
+    bridge = load_plugin_module("config_bridge")
+    for key in ("DISCORD_ALLOWED_CHANNELS", "DISCORD_IGNORED_CHANNELS", "DISCORD_REQUIRE_MENTION"):
+        monkeypatch.setenv(key, "")
+        monkeypatch.delenv(key)
+    block = {"relay": {"enabled": True, "allow": "*"}, "allowed_channels": ["55"],
+             "ignored_channels": ["99"], "require_mention": False, "allow_bots": "all"}
+    adapter = _make_adapter(tmp_path, bridge.apply_yaml_config({"discord": block}, block))
+
+    async def exercise():
+        adapter._ready_event.set()
+        adapter._text_batch_delay_seconds = 0
+        adapter._collect_attachment_media = AsyncMock(return_value=([], [], False, ""))
+        adapter._discord_history_backfill = lambda: False
+        adapter._threads.mark_async = AsyncMock()
+        adapter.handle_message = AsyncMock()
+        assert not await adapter._dispatch_discord_message(relay_message())
+        human = relay_message(message_id=101)
+        human.author = _user(9001)
+        human.content = "<@1000> human request"
+        assert await adapter._dispatch_discord_message(human)
+        ignored = relay_message(message_id=102)
+        ignored.author = _user(9001)
+        ignored.channel.id = 99
+        assert not await adapter._dispatch_discord_message(ignored)
+        outside = relay_message(message_id=103)
+        outside.author = _user(9001)
+        outside.channel.parent.id = 56
+        outside.channel.parent_id = 56
+        assert not await adapter._dispatch_discord_message(outside)
+        adapter.handle_message.assert_awaited_once()
+        assert not adapter._relay_receipts.path.exists()
+
+    asyncio.run(exercise())
+
+
+def test_unowned_relay_refused_then_human_claim_and_followup_reach_owner(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_ALLOW_BOTS", "none")
+    adapter = _make_adapter(tmp_path, {"relay": relay_config(), "thread_ownership_transfer": True})
+    assert not _admit(adapter, relay_message())
+    assert not adapter._relay_receipts.path.exists()
+    assert adapter._ownership_store.owner_of("77") is None
+    _admit(adapter, _message(author=_user(9001), content="<@1000> take this",
+                            mentions=[adapter._client.user], message_id=1))
+
+    async def exercise():
+        adapter._ready_event.set()
+        adapter._text_batch_delay_seconds = 0
+        adapter._collect_attachment_media = AsyncMock(return_value=([], [], False, ""))
+        adapter._discord_history_backfill = lambda: False
+        adapter.handle_message = AsyncMock()
+        assert await adapter._dispatch_discord_message(relay_message(message_id=101))
+        human = relay_message(message_id=102)
+        human.author = _user(9001)
+        human.content = "unmentioned human follow-up"
+        human.mentions = []
+        assert await adapter._dispatch_discord_message(human)
+        assert adapter.handle_message.await_count == 2
+        assert adapter.handle_message.call_args.args[0].source.user_id == "9001"
+        assert adapter._ownership_store.owner_of("77") == "1000"
+        adapter._ownership_store.close()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("result", [None, "yes", 1])
+def test_unknown_gateway_verdict_refuses_before_receipt(receiver, result):
+    receiver.set_authorization_check(lambda *args, **kwargs: result)
+    assert not _admit(receiver, relay_message())
+    assert not receiver._relay_receipts.path.exists()
+
+
+def test_gateway_callback_exception_refuses_before_receipt(receiver):
+    receiver.set_authorization_check(MagicMock(side_effect=RuntimeError("policy unavailable")))
+    assert not _admit(receiver, relay_message())
+    assert not receiver._relay_receipts.path.exists()
+
+
+def test_incompatible_gateway_authorization_method_refuses_before_receipt(receiver):
+    receiver._is_sender_authorized = lambda user_id: True
+    assert not _admit(receiver, relay_message())
+    assert not receiver._relay_receipts.path.exists()
+
+
+@pytest.mark.parametrize("marker", ["<@1000>", "<@", ">", "```"])
+@pytest.mark.parametrize("prefix", ["", "> ", "```"])
+def test_relay_prefixes_cannot_be_custom_handoff_markers(tmp_path, marker, prefix):
+    adapter = _make_adapter(tmp_path, {
+        "relay": relay_config(),
+        "thread_ownership_transfer": {"enabled": True, "handoff_marker": marker},
+    })
+    _admit(adapter, _message(author=_user(9001), content="<@2000>",
+                            mentions=[_user(2000, bot=True)], message_id=1))
+    message = relay_message(message_id=2)
+    message.content = prefix + message.content
     assert not _admit(adapter, message)
     assert adapter._ownership_store.owner_of("77") == "2000"
     assert not adapter._relay_receipts.path.exists()

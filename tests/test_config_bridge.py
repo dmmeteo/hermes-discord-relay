@@ -140,21 +140,23 @@ class TestRelayBridge:
 
     def test_invalid_relay_preserves_native_settings_through_host_loader(self, monkeypatch):
         from types import SimpleNamespace
-        from gateway.config_loader import bridge_plugin_env_settings
+
+        from gateway.config_loader import apply_plugin_yaml_hooks
 
         for key in ("DISCORD_ALLOWED_CHANNELS", "DISCORD_IGNORED_CHANNELS", "DISCORD_REQUIRE_MENTION"):
-            monkeypatch.delenv(key, raising=False)
+            monkeypatch.setenv(key, "")
+            monkeypatch.delenv(key)
         raw = {"enabled": True, "allow": "*"}
         block = {"relay": raw, "allowed_channels": ["55"],
                  "ignored_channels": ["99"], "require_mention": False}
         entry = SimpleNamespace(name="discord", apply_yaml_config_fn=bridge.apply_yaml_config)
         registry = SimpleNamespace(all_entries=lambda: [entry])
         data = {}
-        bridge_plugin_env_settings({"discord": block}, {}, data, registry)
+        apply_plugin_yaml_hooks({"discord": block}, {}, data, registry)
         extra = data["discord"]["extra"]
         assert extra["relay"] == raw
-        assert extra["allowed_channels"] == ["55"]
-        assert extra["ignored_channels"] == ["99"]
+        assert extra["allowed_channels"] == "55"
+        assert extra["ignored_channels"] == "99"
         assert extra["require_mention"] is False
 
     def test_raising_native_bridge_does_not_apply_relay(self):

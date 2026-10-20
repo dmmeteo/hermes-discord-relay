@@ -331,16 +331,19 @@ class DiscordCustomAdapter(DiscordAdapter):
                 return False, False
             relay = RelayConfig()
         bot = bool(getattr(message.author, "bot", False))
-        if relay.enabled and bot and "[[relay" in (message.content or "").lower():
-            return self._relay_admission(message, relay, claim=claim)
+        relay_candidate = relay.enabled and bot and "[[relay" in (message.content or "").lower()
         config = self._ownership_config()
         if not config.enabled:
+            if relay_candidate:
+                return self._relay_admission(message, relay, claim=claim)
             if relay.enabled and bot:
                 return False, False
             return super()._discord_message_admission(message, claim=claim)
 
         facts = self._ownership_facts(message)
         if facts is None or not self._ownership_author_trusted(message):
+            if relay_candidate:
+                return self._relay_admission(message, relay, claim=claim)
             if relay.enabled and bot:
                 return False, False
             return super()._discord_message_admission(message, claim=claim)
@@ -358,6 +361,9 @@ class DiscordCustomAdapter(DiscordAdapter):
                 decision.owner_id,
                 decision.reason,
             )
+
+        if relay_candidate:
+            return self._relay_admission(message, relay, claim=claim)
 
         force = decision.admit_self is True
         if relay.enabled and bot and not force:
@@ -412,6 +418,10 @@ class DiscordCustomAdapter(DiscordAdapter):
                 or envelope.guild_id != route.guild_id or envelope.thread_id != route.thread_id
                 or not config.permits(route)):
             return False, False
+        if (self._ownership_config().enabled
+                and self._ownership_store.owner_of(route.thread_id) != envelope.recipient_id):
+            logger.info("Discord relay refused: recipient is not the current thread owner")
+            return False, False
         # Relay config is an additional ingress policy, never a human or role authorization grant.
         channel_ids = {route.thread_id}
         parent = self._get_parent_channel_id(channel)
@@ -423,6 +433,19 @@ class DiscordCustomAdapter(DiscordAdapter):
                 return False, False
         except Exception:
             logger.warning("Discord relay sender authorization failed", exc_info=True)
+            return False, False
+        # The host callback checks this bot source under its receiving profile's live policy.
+        # Unknown authorization is refused before dedup or durable receipt consumption.
+        authorize = getattr(self, "_is_sender_authorized", None)
+        try:
+            authorized = callable(authorize) and authorize(
+                route.sender_id, "thread", route.thread_id,
+                is_bot=True, thread_id=route.thread_id) is True
+        except Exception:
+            logger.warning("Discord relay gateway authorization unavailable", exc_info=True)
+            return False, False
+        if not authorized:
+            logger.info("Discord relay refused: gateway sender authorization absent or denied")
             return False, False
         if len(self._relay_pending) >= 4096:
             return False, False
