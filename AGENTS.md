@@ -15,7 +15,14 @@ After compaction or context loss, re-read this file, the behaviour table, the se
 
 ## Revision state
 
-This local candidate reconciles public registration fix `4547de4` with the existing local documentation. `register()` now calls `ctx.register_platform()` within the host-owned plugin lifecycle. Stock Hermes v0.22.0 lifecycle and behavioral tests pass; no live install or guild acceptance is claimed. See [the registration decision](docs/adr/0001-plugin-scoped-registration.md) before changing registration timing. The canonical branch and live profiles are unchanged.
+Discord Relay 1.1.0 is a local source candidate. The owner authorized a narrow
+exact-sender/exact-destination relay expansion, separate from ownership, on
+2026-10-20. Native adapter/security/lifecycle tests cover source behavior.
+Publication, install, gateway restart, and live guild acceptance remain pending.
+Read [the relay decision](docs/adr/0002-controlled-discord-relay.md) before
+changing relay admission, receipts, authorization, or acknowledgement behavior.
+Read [the registration decision](docs/adr/0001-plugin-scoped-registration.md)
+before changing host-owned registration timing.
 
 ## Routes
 
@@ -23,6 +30,7 @@ This local candidate reconciles public registration fix `4547de4` with the exist
 |---|---|
 | Registration and fallback to the built-in adapter | `__init__.py` (`register`, `_install_override`, `_fall_back_to_builtin`, `PLATFORM_ID`) |
 | Admission override and bot gate | `adapter.py` (`DiscordCustomAdapter`, `_discord_message_admission`) |
+| Relay schema, protocol and durable receipts | `relay.py` (`RelayConfig`, `RelayEnvelope`, `RelayReceiptStore`), `adapter.py` (`_relay_admission`, `_handle_message`) |
 | Ownership rules and per-profile store | `ownership.py` (`OwnershipConfig`, `ThreadOwnershipStore`) |
 | `discord.thread_ownership_transfer` config and env switch | `config_bridge.py` (`apply_yaml_config`) |
 | Borrowed Hermes internals | `compat.py` (`probe`, `require_supported`) |
@@ -31,10 +39,12 @@ This local candidate reconciles public registration fix `4547de4` with the exist
 ## Boundaries that must hold
 
 - Ingress filtering only. The plugin decides which inbound Discord messages reach an agent. It makes no Discord API calls and never changes Discord's own thread owner.
-- Off by default. A profile opts in through `discord.thread_ownership_transfer`.
+- Off by default. Ownership opts in through `discord.thread_ownership_transfer`; relay separately requires `discord.relay.enabled: true`.
 - Every failure path ends at the built-in Discord adapter, and a partial Discord config is never applied.
-- Bots cannot claim or steal ownership. The only bot-authored message that is force-admitted is a validated handoff from the current owner, within the guards.
-- `bot_handoff: off` preserves the stock `DISCORD_ALLOW_BOTS` boundary exactly. A truthy env switch must never reopen it.
+- Bots cannot claim or steal ownership. Force-admission is limited to a guarded owner handoff or an explicitly configured validated relay. Relay never changes ownership.
+- With relay disabled, `bot_handoff: off` preserves the stock `DISCORD_ALLOW_BOTS` boundary exactly. A truthy ownership env switch must never reopen it or enable relay.
+- Relay preserves bot identity and native human authorization. Routes and payload text never authenticate human identity or approval. No global bot-gate expansion, webhook, self, stale, duplicate, or reforwarded relay admission.
+- Relay reserves a durable bounded receipt before admission. Storage failure denies. No transport result or admission log is represented as completion.
 - The platform ID stays `discord`.
 - An unresolved inline mention makes no ownership change.
 

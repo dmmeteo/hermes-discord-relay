@@ -124,3 +124,34 @@ class TestLoudFailure:
         from plugins.platforms.discord.adapter import _apply_yaml_config as builtin
 
         assert bridge.resolve_builtin_bridge() is builtin
+
+
+class TestRelayBridge:
+    def test_relay_and_legacy_ownership_bridge_together(self):
+        raw = {"enabled": True, "allow": [
+            {"sender_id": "2000", "guild_id": "4242", "thread_id": "77"}]}
+        block = {"relay": raw, "thread_ownership_transfer": True}
+        extra = _apply(block)
+        assert extra["relay"] == raw
+        assert extra["thread_ownership_transfer"] is True
+        nested = bridge.apply_yaml_config({"platforms": {"discord": block}}, block)
+        assert nested["relay"] == raw
+        assert bridge.apply_yaml_config({"discord": block}, {})["relay"] == raw
+
+    def test_invalid_relay_is_rejected_before_any_native_config_is_applied(self):
+        import plugins.platforms.discord.adapter as builtin
+        with patch.object(builtin, "_apply_yaml_config") as apply:
+            with pytest.raises(ValueError):
+                _apply({"relay": {"enabled": True, "allow": "*"}})
+            apply.assert_not_called()
+
+    def test_raising_native_bridge_does_not_apply_relay(self):
+        import plugins.platforms.discord.adapter as builtin
+        with patch.object(builtin, "_apply_yaml_config", side_effect=RuntimeError):
+            with pytest.raises(RuntimeError):
+                _apply({"relay": {"enabled": True}})
+
+    def test_relay_bridge_never_sets_global_bot_policy(self, monkeypatch):
+        monkeypatch.setenv("DISCORD_ALLOW_BOTS", "none")
+        _apply({"relay": {"enabled": True}})
+        assert os.environ["DISCORD_ALLOW_BOTS"] == "none"

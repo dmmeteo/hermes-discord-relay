@@ -1090,10 +1090,6 @@ class TestGateSnapshot:
 # ── the same guarantees on a core without those helpers ─────────────────────
 
 
-@pytest.mark.skipif(
-    _compat.has_gate_env_snapshot,
-    reason="this Hermes build snapshots gate env; see TestGateSnapshot",
-)
 class TestLegacyGateFallback:
     """A build without the gate helpers keeps the feature, on a live read.
 
@@ -1102,6 +1098,20 @@ class TestLegacyGateFallback:
     such a build.  What must not change is the *precedence*, because that is
     what makes the env kill switch work.
     """
+
+    @pytest.fixture(autouse=True)
+    def legacy_gate_helpers(self, monkeypatch):
+        from plugins.platforms.discord.adapter import DiscordAdapter
+
+        original_init = DiscordAdapter.__init__
+
+        def legacy_init(adapter, *args, **kwargs):
+            original_init(adapter, *args, **kwargs)
+            adapter.__dict__.pop("_gate_env_snapshot", None)
+
+        monkeypatch.setattr(DiscordAdapter, "__init__", legacy_init)
+        for name in ("_snapshot_gate_env", "_gate_env", "_gate_raw", "_get_allow_bots"):
+            monkeypatch.setattr(DiscordAdapter, name, None, raising=False)
 
     def test_calling_the_snapshot_override_is_inert(self, tmp_path):
         a = _make_adapter(tmp_path)

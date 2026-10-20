@@ -3,7 +3,8 @@
 The built-in Discord plugin owns the translation of the whole ``discord:``
 block in ``config.yaml`` into ``DISCORD_*`` env vars and adapter extras.  This
 wrapper runs that translation first — so every existing Discord setting keeps
-working untouched — and then adds the one key this plugin introduces:
+working untouched — and adds the independent ownership and relay settings this plugin introduces.
+Relay is validated before native configuration is applied:
 
 .. code-block:: yaml
 
@@ -42,6 +43,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .compat import IncompatibleHermesError
+from .relay import RelayConfig
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +96,11 @@ def _read_ownership_value(yaml_cfg: Any, discord_cfg: Any) -> Any:
 
 
 def apply_yaml_config(yaml_cfg: dict, discord_cfg: dict) -> dict:
-    """Inherit the built-in bridge, then add ``thread_ownership_transfer``."""
+    """Validate relay, inherit the native bridge, then add the plugin settings."""
+    relay_raw = discord_cfg.get("relay") if isinstance(discord_cfg, dict) else None
+    if relay_raw is None and isinstance(yaml_cfg.get("discord"), dict):
+        relay_raw = yaml_cfg["discord"].get("relay")
+    RelayConfig.parse(relay_raw)
     builtin_apply = resolve_builtin_bridge()
 
     try:
@@ -114,6 +120,9 @@ def apply_yaml_config(yaml_cfg: dict, discord_cfg: dict) -> dict:
     extra: dict = {}
     if isinstance(inherited, dict):
         extra.update(inherited)
+
+    if relay_raw is not None:
+        extra["relay"] = relay_raw
 
     raw = _read_ownership_value(yaml_cfg, discord_cfg)
     if raw is None:

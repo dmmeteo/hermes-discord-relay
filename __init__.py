@@ -1,4 +1,4 @@
-"""hermes-discord-thread-ownership — single-owner Discord thread admission.
+"""Discord Relay, installed as hermes-discord-thread-ownership.
 
 A thin override of the built-in Discord platform adapter.  Everything else —
 connection, voice, slash commands, media, auth, reactions, threads, cron
@@ -89,9 +89,9 @@ def _install_override(ctx) -> None:
     compat.require_supported(support)
     if support.missing_optional:
         logger.warning(
-            "hermes-discord-thread-ownership: %s. The feature is fully "
-            "available; these paths are less profile-scoped than the native "
-            "ones. See README 'Hermes compatibility'.",
+            "hermes-discord-thread-ownership: %s. Ownership fallbacks remain "
+            "available; relay requires native bot-gate and dispatch hooks. "
+            "See README 'Hermes compatibility'.",
             compat.describe(support),
         )
 

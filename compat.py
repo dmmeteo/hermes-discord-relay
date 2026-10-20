@@ -361,3 +361,14 @@ def scoped_gate_env(name: str, default: str = "") -> str:
         except Exception:  # pragma: no cover - defensive
             logger.debug("Scoped gate env read failed for %s", name, exc_info=True)
     return (os.getenv(name) or default).strip()
+
+
+def relay_dispatch_supported() -> bool:
+    """Relay must bypass native text coalescing without changing global gate settings."""
+    from plugins.platforms.discord.adapter import DiscordAdapter
+
+    try:
+        params = inspect.signature(DiscordAdapter._handle_message).parameters
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return "recovered" in params

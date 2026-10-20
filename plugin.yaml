@@ -6,13 +6,12 @@
 manifest_version: 1
 name: hermes-discord-thread-ownership
 kind: platform
-version: 1.0.0
+version: 1.1.0
 description: >
-  Discord adapter override adding single-owner thread admission. Subclasses the
-  built-in Discord adapter and changes only who is allowed to answer inside a
-  thread; connection, voice, slash commands, media, auth, reactions and cron
-  delivery are inherited unchanged. Registers under the "discord" platform ID,
-  replacing the bundled entry.
+  Discord Relay adds opt-in trusted bot requests to existing guild threads and
+  compatible single-owner thread admission. Uses the native Discord adapter,
+  preserves bot provenance and downstream authorization, and registers under
+  the existing discord platform ID. Install identity remains unchanged.
 author: dmmeteo
 requires_env:
   - name: DISCORD_BOT_TOKEN

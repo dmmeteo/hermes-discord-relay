@@ -1,13 +1,23 @@
-# hermes-discord-thread-ownership
+# Discord Relay
 
-A [Hermes](https://github.com/NousResearch/hermes-agent) platform plugin that
-gives Discord threads a **single owner**: inside a thread exactly one bot
-answers at a time, and you move ownership by @mentioning whichever bot you
-want.
+A [Hermes](https://github.com/NousResearch/hermes-agent) Discord plugin for
+controlled bot requests and single-owner threads. A trusted sender sends one
+explicit request to an existing thread. The recipient works there and reports
+to the human, without starting a bot conversation.
 
-It subclasses the built-in Discord adapter and overrides only admission —
-connection, voice, slash commands, media, auth, reactions, threads and cron
-delivery are inherited unchanged. Off by default; opt in per profile.
+Both features are opt-in per profile. Relay is configured independently under
+`discord.relay`. Existing `discord.thread_ownership_transfer` configuration and
+the install name `hermes-discord-thread-ownership` remain compatible.
+
+The plugin subclasses the built-in Discord adapter. Connection, voice, slash
+commands, media, reactions, thread transport, and cron delivery remain native.
+Relay adds a narrow ingress policy; it preserves bot identity and downstream
+Hermes authorization. It makes no Discord API calls itself and does not change
+Discord's thread owner.
+
+See [Configure a receiver](#configure-a-receiver) and
+[Send once to an existing thread](#send-once-to-an-existing-thread). For ownership
+alone, the existing setting still works:
 
 ```yaml
 discord:
@@ -25,7 +35,7 @@ you then have to @mention on *every* message.
 
 ## The behaviour
 
-When enabled, inside a **guild thread**:
+When `thread_ownership_transfer` is enabled, inside a **guild thread**:
 
 | Event | Result |
 |---|---|
@@ -37,7 +47,8 @@ When enabled, inside a **guild thread**:
 | A non-owner bot posts anything | Ownership unchanged — bots cannot claim or steal |
 | The **owner** posts `[[handoff]] @C` | C owns it; the owner goes silent (agent-to-agent handoff) |
 
-DMs, plain channels, and every non-thread path are untouched.
+Ownership leaves DMs, plain channels, and every non-thread path untouched.
+Relay accepts requests only inside explicitly allowed guild threads.
 
 Ownership survives `/new` and a gateway restart: it is cached per profile in
 `$HERMES_HOME/discord_thread_ownership.json`.
@@ -82,6 +93,13 @@ hermes gateway restart
 ```
 
 ### Local source candidate
+
+The 1.1.0 source candidate adds Discord Relay. Native-adapter, lifecycle,
+security, and backward-compatibility checks are automated; no live guild
+acceptance, installation, publication, or deployment is claimed. See the
+[release and migration notes](docs/releases/1.1.0.md).
+
+The previous registration baseline follows for historical context.
 
 Registration source candidate `b2611f83e59c6b82332280fe8c80859d9391f949` on
 `prime/audit-1015-discord` reconciles public fix `4547de4` with this branch's
@@ -136,7 +154,140 @@ nothing else changes. To also clear ownership state, delete
 
 ## Configuration
 
-One key, under the existing `discord:` block:
+Relay and ownership have separate opt-ins. Existing ownership-only profiles
+need no migration. Keep the native bot gate at `none` for relay-only bot ingress.
+
+### Configure a receiver
+
+Use exact ID strings, never names or wildcards. The examples use generic IDs;
+replace them with the sender bot, guild, and existing destination thread IDs.
+Configure each receiving profile separately. Allowing A to send to B does not
+allow B to send to A.
+
+```yaml
+discord:
+  allow_bots: none
+  relay:
+    enabled: true
+    allow:
+      - sender_id: "2000"
+        guild_id: "4242"
+        thread_id: "77"
+    deny: []
+  thread_ownership_transfer:
+    enabled: true
+    bot_handoff: off
+```
+
+The relay route is an additional restriction, **not a human authorization
+grant**. The sender must also pass the native adapter's user, role, or channel
+policy and the gateway's independent authorization. For an ID allowlist, include
+the exact sender bot ID alongside the humans in `DISCORD_ALLOWED_USERS` on the
+receiver. Keep `DISCORD_ALLOW_BOTS=none`. Do not set open access or a wildcard to
+make relay work. A role-only adapter grant does not become a gateway role grant
+for a bot. The plugin always forwards `role_authorized=False` for relay.
+
+| Key | Policy |
+|---|---|
+| `relay.enabled` | Boolean, default `false`. `relay: false` also disables it. A mapping alone does not enable relay. |
+| `relay.allow` | At most 256 exact `{sender_id, guild_id, thread_id}` routes. Default empty means deny. |
+| `relay.deny` | Same shape and limit. An exact deny wins over an allow. |
+
+Unknown keys, numeric IDs, wildcards, partial routes, and malformed values are
+configuration errors. Validation runs before the native YAML bridge, so a bad
+relay block cannot leave a partially applied Discord configuration. A malformed
+runtime extra denies bot ingress. No relay environment variable enables or
+widens this policy. Native allowed and ignored channel gates still apply.
+
+With relay enabled, ordinary bot output and mention pings are denied even if
+the native bot setting is wider. A separately validated owner handoff can still
+pass when ownership handoff is enabled. Set `bot_handoff: off` as above to allow
+only relay requests. With relay disabled, the old bot and ownership behavior is
+preserved.
+
+### Send once to an existing thread
+
+1. Identify the existing thread from the human's message link or the native
+   channel directory. A Discord message link contains guild, thread, and message
+   IDs. If needed, use native `discord_admin` `channel_info` with the thread ID
+   and `discord` `fetch_messages` to confirm its context. Use only actions your
+   profile already permits. If the destination cannot be verified, report a
+   blocker to the human and stop. Do not create another thread or guess by name.
+2. Confirm the receiver permits your bot ID for that exact guild and thread.
+   Generate a fresh lowercase UUID hex request ID and an expiry at most 300
+   seconds ahead. Send within that window.
+3. Use the existing `send_message` tool once, with `target: "discord:77"` for
+   this example's thread, and the exact text format below. Use one message with
+   no attachments, reply reference, forwarded snapshot, or extra mention.
+4. Report the transport result to the human and stop. Do not poll the receiver,
+   retry after an uncertain send, send a follow-up, monitor the thread, or
+   redelegate. A human can resolve an uncertain outcome before a new request.
+
+```text
+<@1000> [[relay:v1 id=0123456789abcdef0123456789abcdef guild=4242 thread=77 expires=1800000120 hop=1]]
+Summarize the task for the human in this thread.
+```
+
+Replace `1000` with the recipient's exact bot ID. The expiry above is illustrative,
+not a reusable timestamp. Generate a request ID with `uuid.uuid4().hex` and expiry
+with `int(time.time()) + 120`. The header must start at the first character, use
+exactly the shown field order and spacing, and end with one newline before the
+payload. Only `<@ID>` is accepted, not a reply ping or `<@!ID>`.
+
+The total text limit is 2,000 characters and the payload limit is 1,400. The
+payload must be nonempty and cannot contain additional user or role mentions,
+`@everyone`, `@here`, nested relay envelopes, or handoff markers. Only native
+bot-authored default messages from the last 300 seconds are eligible, with at
+most 30 seconds of future clock skew. Webhooks, self messages, replies,
+forwarded snapshots, attachments, other recipients, mismatched destinations,
+stale messages, and hop values other than `1` are denied.
+
+### Recipient behavior and delivery status
+
+The recipient sees the real sender bot ID, guild, thread, message ID, request ID,
+and a provenance notice before the payload. Native source identity remains a
+bot. Text claiming a human identity, consent, or approval authenticates none of
+those claims. Normal tool permissions and human approval requirements still
+apply. The notice directs the recipient to report its result or blocker to the
+human in that thread, without replying to the sender, forwarding, redelegating,
+or monitoring for bot follow-ups. These are recipient instructions, not a
+sandbox that can constrain a model or another plugin's outbound tools.
+
+There is no admission acknowledgement on a supported bounded native seam, so
+this plugin sends none. A successful native send proves only that Discord
+stored the message. Report **"Sent to Discord; recipient admission unconfirmed;
+human result pending."** Do not report accepted, delivered to the agent, or
+completed from a send result. The receiver's `Discord relay admitted request`
+log records a durable local admission, not downstream gateway acceptance or
+completion. The human-facing result is the recipient's later report.
+
+### Relay persistence and failure behavior
+
+Receipts live per profile in `$HERMES_HOME/discord_relay_receipts.sqlite3`.
+One synchronous SQLite transaction commits before local admission returns.
+Request IDs are unique per recipient across senders, and Discord message IDs are
+unique across that profile's receipts. Duplicate requests are denied across
+adapter recreation, plugin reload, and gateway restart. Concurrent connections
+on the same profile cannot reserve the same request twice. This concurrency
+guarantee applies to relay receipts; ownership still has its one-writer limit.
+
+The store keeps at most 4,096 receipts for 24 hours. At capacity, it denies new
+requests instead of evicting replay protection. Expired receipts are removed on
+the next reservation. The record stores IDs and retention time, not the payload.
+Never reuse request IDs. After retention expires, the same textual request ID
+is no longer protected, but an original stale Discord message is still denied.
+Disk errors, corruption, or lock contention deny admission without resetting
+the database. SQLite's lock wait is 250ms; filesystem commit latency can also
+pause ingress. There is no background receipt writer or open connection to drain.
+
+This is **at-most-once admission**, not exactly-once execution. A crash after the
+receipt commit can lose the task before the gateway accepts it. No automatic
+retry or model-generated acknowledgement repairs that gap. Keep receipts during
+updates and rollback. Deleting them removes replay protection for fresh messages.
+
+### Ownership configuration
+
+The original setting remains under the existing `discord:` block:
 
 ```yaml
 discord:
@@ -180,6 +331,11 @@ to the `marker` default, so it can never re-open the bot ingress path described
 in the security note below.
 
 ### Security note: what `bot_handoff` changes about `DISCORD_ALLOW_BOTS`
+
+This section describes ownership handoff with relay disabled. Enabling
+`discord.relay` adds the separate exact-sender, exact-destination policy above.
+`bot_handoff: off` does not turn relay off. An ownership env switch never enables
+relay or resets its routes. Disable both features to restore stock ingress.
 
 **Enabling this feature with the default `bot_handoff: marker` widens Discord's
 bot ingress boundary.** Read this before enabling it on a server with
@@ -236,7 +392,7 @@ inherits the built-in `PlatformEntry` wholesale, then overrides two callables:
 | `hermes setup` Discord wizard | built-in `setup_fn`, unchanged |
 | `discord` / `discord_admin` toolsets | unchanged |
 | Adapter construction | **overridden** → `DiscordCustomAdapter` |
-| YAML bridge | **overridden** → built-in bridge, then `thread_ownership_transfer` |
+| YAML bridge | **overridden** → relay validation, built-in bridge, then both opt-ins |
 
 ---
 
@@ -289,8 +445,9 @@ mention:
 [[handoff]] <@OTHER_BOT_ID>
 ```
 
-The receiving bot is admitted even though `DISCORD_ALLOW_BOTS` is `none` — this
-is the only case where a bot-authored message is force-admitted.
+The receiving bot is admitted even though `DISCORD_ALLOW_BOTS` is `none`.
+This is the ownership feature's force-admission path. Relay has a separate
+explicit opt-in and never changes ownership.
 
 Guards, all bot-initiated only (a human @mention always overrides and resets
 them):
@@ -427,9 +584,10 @@ policy.
 |---|---|
 | `plugin.yaml` | Manifest. `name` is the install directory and the `plugins enable` key. |
 | `__init__.py` | `register(ctx)` — inherits the built-in `PlatformEntry`, swaps two callables. |
-| `adapter.py` | `DiscordCustomAdapter(DiscordAdapter)` — overrides admission and the bot gate only. |
+| `adapter.py` | Native adapter subclass with ownership/relay admission, scoped bot gate, and relay provenance on dispatch. |
 | `ownership.py` | Pure decision engine + per-profile persistent store. No `discord` import. |
-| `config_bridge.py` | Calls the built-in YAML bridge, then adds `thread_ownership_transfer`. |
+| `relay.py` | Strict relay config, envelope, provenance text, and bounded durable SQLite receipts. |
+| `config_bridge.py` | Validates relay, calls the built-in YAML bridge, then adds both opt-ins. |
 | `compat.py` | Classifies the borrowed core internals; fallbacks and the loud failure path. |
 | `tests/` | The suite below. |
 
@@ -448,9 +606,19 @@ ruff check .
 `run-tests.sh` runs pytest from `tests/` on purpose: the repository root is the
 plugin package, so pytest must not collect it as a test package.
 
-Tests that exercise a seam the local Hermes build does not have are skipped with
-a reason rather than failing — the compatibility matrix above is itself covered
-by `tests/test_compat.py`.
+The current stock Hermes gate runs the complete suite, including legacy gate
+fallbacks exercised with those native helpers removed. Older builds without the
+modern snapshot seam cannot run snapshot tests. Relay requires the native
+per-adapter bot hook and `_handle_message(..., recovered=...)`; without either,
+relay refuses admission and logs the missing capability. Ownership retains its
+older compatibility fallbacks. No relay path mutates process-global bot policy.
+
+`tests/test_relay_adapter.py` covers actual native admission and dispatch,
+including a real `discord.Message`, sender provenance, gateway authorization,
+negative security cases, profile isolation, restart receipts, and concurrency.
+`tests/test_relay_lifecycle.py` exercises the selected factory through stock
+load/unload/reload and old configuration. These offline tests make no live guild
+or model-completion claim.
 
 ## License
 

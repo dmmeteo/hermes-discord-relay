@@ -1,27 +1,18 @@
-"""``DiscordCustomAdapter`` — the built-in Discord adapter plus thread ownership.
+"""Native Discord adapter with independent opt-in ownership and controlled relay.
 
-Only two behaviours are overridden:
-
-* :meth:`DiscordCustomAdapter._discord_message_admission` — observes every
-  trusted message in a guild thread to keep ownership current, then narrows
-  (or, for a validated handoff, widens) the built-in admission verdict.
-* :meth:`DiscordCustomAdapter._get_allow_bots` — lets exactly one class of
-  bot-authored message through: an owner-initiated handoff addressed to us.
-
-Everything else is inherited.  When the feature is off, both overrides are a
-straight delegation to the built-in adapter and nothing is read or written.
-
-``discord`` is imported through :mod:`compat`, never at module scope: it is a
-lazily-installed Hermes extra, so on a fresh host it can legitimately be absent
-at the moment this module loads.  Without the guard the *plugin* would be the
-thing that fails there, and the feature would silently vanish for a run.
+Admission observes ownership or validates an addressed relay. The native bot gate
+is widened for one synchronous call only. Relay dispatch adds provenance without
+changing the bot author or granting human authorization. All transport stays in
+the native adapter. No Discord dependency is imported at module scope.
 """
 
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import re
+import sqlite3
 import time
 from typing import Any
 
@@ -29,6 +20,7 @@ from plugins.platforms.discord.adapter import DiscordAdapter
 
 from . import compat
 from .ownership import MessageFacts, OwnershipConfig, ThreadOwnershipStore
+from .relay import STATE_FILENAME, RelayConfig, RelayEnvelope, RelayReceiptStore, RelayRoute
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +37,16 @@ def _ownership_message_types(discord_mod: Any) -> set:
 
 
 class DiscordCustomAdapter(DiscordAdapter):
-    """Discord adapter with single-owner thread admission."""
+    """Discord adapter with independent ownership and trusted relay admission."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._ownership_store_cache: ThreadOwnershipStore | None = None
         self._ownership_force_admit = False
+        from hermes_constants import get_hermes_home
+
+        self._relay_receipts = RelayReceiptStore(get_hermes_home() / STATE_FILENAME)
+        self._relay_pending: dict[str, RelayEnvelope] = {}
         # Probed per adapter, not per message: the answer cannot change inside
         # a process, and the construction site is where a surprising build
         # should be visible in the log.
@@ -308,7 +304,7 @@ class DiscordCustomAdapter(DiscordAdapter):
     # -- overrides ----------------------------------------------------------
 
     def _get_allow_bots(self) -> str:
-        """Widen the bot gate for the single message that is a handoff to us.
+        """Widen the bot gate for one validated handoff or relay to us.
 
         The flag is set only for the duration of one synchronous call into the
         built-in admission gate, so it cannot leak into another message.
@@ -327,12 +323,26 @@ class DiscordCustomAdapter(DiscordAdapter):
     def _discord_message_admission(
         self, message: Any, *, claim: bool
     ) -> tuple[bool, bool]:
+        try:
+            relay = RelayConfig.parse(compat.extra_value(self, "relay"))
+        except ValueError:
+            logger.error("Invalid discord.relay config; bot ingress denied", exc_info=True)
+            if getattr(message.author, "bot", False):
+                return False, False
+            relay = RelayConfig()
+        bot = bool(getattr(message.author, "bot", False))
+        if relay.enabled and bot and "[[relay" in (message.content or "").lower():
+            return self._relay_admission(message, relay, claim=claim)
         config = self._ownership_config()
         if not config.enabled:
+            if relay.enabled and bot:
+                return False, False
             return super()._discord_message_admission(message, claim=claim)
 
         facts = self._ownership_facts(message)
         if facts is None or not self._ownership_author_trusted(message):
+            if relay.enabled and bot:
+                return False, False
             return super()._discord_message_admission(message, claim=claim)
 
         if self._ownership_is_replay(message):
@@ -350,6 +360,8 @@ class DiscordCustomAdapter(DiscordAdapter):
             )
 
         force = decision.admit_self is True
+        if relay.enabled and bot and not force:
+            return False, False
         self._ownership_force_admit = force
         # On a core without ``_get_allow_bots`` our override is never consulted,
         # so the gate has to be widened through the environment instead.
@@ -370,6 +382,90 @@ class DiscordCustomAdapter(DiscordAdapter):
             return False, False
         return True, role_authorized
 
+    def _relay_admission(
+        self, message: Any, config: RelayConfig, *, claim: bool
+    ) -> tuple[bool, bool]:
+        discord = compat.discord_module()
+        author = getattr(message, "author", None)
+        client_user = getattr(self._client, "user", None) if self._client else None
+        channel = getattr(message, "channel", None)
+        guild = getattr(message, "guild", None)
+        if (discord is None or client_user is None or guild is None
+                or not isinstance(channel, discord.Thread)
+                or not getattr(author, "bot", False)
+                or str(author.id) == str(client_user.id)
+                or getattr(message, "webhook_id", None) is not None
+                or getattr(message, "reference", None) is not None
+                or getattr(message, "message_snapshots", None)
+                or getattr(message, "attachments", None)
+                or message.type != discord.MessageType.default
+                or not self._ownership_channel_in_scope(message)):
+            return False, False
+        now = time.time()
+        try:
+            created = message.created_at.timestamp()
+            envelope = RelayEnvelope.parse(message.content, now=now, created=created)
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            return False, False
+        route = RelayRoute(str(author.id), str(guild.id), str(channel.id))
+        if (envelope is None or envelope.recipient_id != str(client_user.id)
+                or envelope.guild_id != route.guild_id or envelope.thread_id != route.thread_id
+                or not config.permits(route)):
+            return False, False
+        # Relay config is an additional ingress policy, never a human or role authorization grant.
+        channel_ids = {route.thread_id}
+        parent = self._get_parent_channel_id(channel)
+        if parent:
+            channel_ids.add(str(parent))
+        try:
+            if not self._is_allowed_user(route.sender_id, author, guild=guild,
+                                         is_dm=False, channel_ids=channel_ids):
+                return False, False
+        except Exception:
+            logger.warning("Discord relay sender authorization failed", exc_info=True)
+            return False, False
+        if len(self._relay_pending) >= 4096:
+            return False, False
+        # Require the scoped hook. Relay never mutates process-global bot policy on legacy cores.
+        if not self._compat.has_allow_bots_hook or not compat.relay_dispatch_supported():
+            logger.error("Discord relay requires native bot-gate and recovered dispatch hooks")
+            return False, False
+        self._ownership_force_admit = True
+        try:
+            admitted, _ = super()._discord_message_admission(message, claim=claim)
+        finally:
+            self._ownership_force_admit = False
+        if not admitted:
+            return False, False
+        try:
+            reserved = self._relay_receipts.reserve(
+                sender_id=route.sender_id, recipient_id=envelope.recipient_id,
+                request_id=envelope.request_id, message_id=str(message.id), now=now,
+            )
+        except (OSError, sqlite3.Error):
+            logger.error("Discord relay receipt unavailable; refusing dispatch", exc_info=True)
+            return False, False
+        if not reserved:
+            return False, False
+        self._relay_pending[str(message.id)] = envelope
+        logger.info("Discord relay admitted request %s from bot %s in thread %s",
+                    envelope.request_id, route.sender_id, route.thread_id)
+        return True, False
+
+    async def _handle_message(self, message: Any, role_authorized: bool = False,
+                              *, recovered: bool = False) -> bool:
+        envelope = self._relay_pending.pop(str(message.id), None)
+        if envelope is None:
+            if recovered:
+                return await super()._handle_message(message, role_authorized=role_authorized,
+                                                      recovered=True)
+            return await super()._handle_message(message, role_authorized=role_authorized)
+        forwarded = copy.copy(message)
+        forwarded.content = envelope.recipient_text(sender_id=str(message.author.id),
+                                                    message_id=str(message.id))
+        # Native recovered=True skips text coalescing. Each receipt stays one bot-authored event.
+        return await super()._handle_message(forwarded, role_authorized=False, recovered=True)
+
     async def disconnect(self) -> None:
         """Drain queued ownership writes before the built-in teardown.
 
@@ -378,6 +474,7 @@ class DiscordCustomAdapter(DiscordAdapter):
         in a worker thread so shutdown does not block the loop either, and a
         failure here must never prevent the adapter from disconnecting.
         """
+        self._relay_pending.clear()
         store = self._ownership_store_cache
         if store is not None:
             try:
