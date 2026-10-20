@@ -92,27 +92,13 @@ and restart the gateway:
 hermes gateway restart
 ```
 
-### Local source candidate
+### Release status
 
-The 1.1.0 source candidate adds Discord Relay. Native-adapter, lifecycle,
-security, and backward-compatibility checks are automated; no live guild
-acceptance, installation, publication, or deployment is claimed. See the
-[release and migration notes](docs/releases/1.1.0.md).
-
-The previous registration baseline follows for historical context.
-
-Registration source candidate `b2611f83e59c6b82332280fe8c80859d9391f949` on
-`prime/audit-1015-discord` reconciles public fix `4547de4` with this branch's
-existing behavior and documentation. Its full suite passes on stock Hermes
-v0.22.0 (`e06df9c2eae6901f4c88f464e0ae6e753c0428b8`) with Python 3.14.7.
-This is a local candidate, not a new public release or a deployment. Live guild
-acceptance remains pending in the [outcome checklist](planning/next-epics.md).
-
-The source rollback target is `d02ad1a607ec719bfa63f8ecc9bc06913ca26d10`.
-It restores the known deferred-registration failure on v0.22.0. For a later
-authorized rollout, disabling the plugin restores stock Discord on the next
-gateway start, as described under [Update and rollback](#update-and-rollback).
-No runtime rollback is needed for this source-only task.
+Version 1.1.0 adds Discord Relay. See the
+[release and migration notes](docs/releases/1.1.0.md) before enabling relay.
+Publication, tagging, profile installation, gateway restart, and live guild
+acceptance of this version remain pending. Offline tests verify native adapter,
+security, and lifecycle behavior; they do not prove live task completion.
 
 ### Several profiles
 

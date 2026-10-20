@@ -15,10 +15,13 @@ After compaction or context loss, re-read this file, the behaviour table, the se
 
 ## Revision state
 
-Discord Relay 1.1.0 is a local source candidate. The owner authorized a narrow
-exact-sender/exact-destination relay expansion, separate from ownership, on
-2026-10-20. Native adapter/security/lifecycle tests cover source behavior.
-Publication, install, gateway restart, and live guild acceptance remain pending.
+Discord Relay 1.1.0 includes the owner-authorized exact-sender and
+exact-destination relay expansion of 2026-10-20, separate from ownership.
+`register()` installs the Discord override through the supplied plugin context,
+inside the profile-scoped lifecycle that Hermes owns. Native adapter, security,
+and lifecycle tests cover source behavior. Publication, tagging, profile
+installation, gateway restart, and live guild acceptance remain pending.
+The revision used by a live profile is not recorded here.
 Read [the relay decision](docs/adr/0002-controlled-discord-relay.md) before
 changing relay admission, receipts, authorization, or acknowledgement behavior.
 Read [the registration decision](docs/adr/0001-plugin-scoped-registration.md)

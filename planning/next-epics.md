@@ -1,6 +1,6 @@
 # Next epics
 
-The only outcome checklist for this repository. Statuses describe this local candidate. Implemented code is not runtime verification or user acceptance. An item is checked only after its completion condition is verified. Candidates are not selected and are not permission to implement.
+The only outcome checklist for this repository. Statuses describe source behavior and separately recorded live acceptance. Implemented code is not runtime verification or user acceptance. An item is checked only after its completion condition is verified. Candidates are not selected and are not permission to implement.
 
 ## Delivered baseline
 
